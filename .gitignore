@@ -1,0 +1,21 @@
+# Environment
+.env
+
+# Go
+go.sum
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+/tmp/
+
+# Frontend
+chatcraft-ui/node_modules/
+chatcraft-ui/dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
