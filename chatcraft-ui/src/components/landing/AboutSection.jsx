@@ -1,104 +1,24 @@
 import {
-  Blocks,
-  Bot,
+  Github,
+  Linkedin,
+  GraduationCap,
+  Code2,
+  Server,
+  Brain,
   Database,
-  Globe,
-  Zap,
-  Shield,
-  MessageSquare,
-  BarChart3,
 } from "lucide-react";
-
-const features = [
-  {
-    icon: <Blocks size={28} />,
-    title: "Visual Flow Builder",
-    description:
-      "Design conversation flows with an intuitive drag-and-drop canvas. No coding required — connect nodes, set conditions, and define your bot logic visually.",
-  },
-  {
-    icon: <Bot size={28} />,
-    title: "Multi-LLM Integration",
-    description:
-      "Connect to OpenAI GPT, Anthropic Claude, Google Gemini, or local models via Ollama. Switch providers, set temperature, and customize prompts per node.",
-  },
-  {
-    icon: <Database size={28} />,
-    title: "RAG Knowledge Base",
-    description:
-      "Upload PDFs, DOCX, text files, or scrape URLs. Documents are chunked, embedded, and indexed so your bot answers from your own data with source citations.",
-  },
-  {
-    icon: <Globe size={28} />,
-    title: "One-Click Website Embed",
-    description:
-      "Generate a lightweight script tag and paste it into any website. Customizable widget with your brand colors, avatar, and welcome message.",
-  },
-  {
-    icon: <MessageSquare size={28} />,
-    title: "Live Chat & Testing",
-    description:
-      "Test your bot in real-time with a built-in chat preview. Debug panel shows RAG retrieval, LLM calls, and the exact flow path taken.",
-  },
-  {
-    icon: <Zap size={28} />,
-    title: "Smart Node Types",
-    description:
-      "Trigger, Message, Input, Condition, API Call, Webhook, Delay, Variable, Carousel, and Human Handoff — everything you need in one toolbox.",
-  },
-  {
-    icon: <Shield size={28} />,
-    title: "Secure & Scalable",
-    description:
-      "JWT authentication, domain whitelisting, rate limiting, and encrypted API keys. Built on Go for performance and reliability at scale.",
-  },
-  {
-    icon: <BarChart3 size={28} />,
-    title: "Analytics Dashboard",
-    description:
-      "Track total conversations, resolution rates, drop-off points, and average session duration. Understand your bot's performance at a glance.",
-  },
-];
 
 export default function AboutSection() {
   return (
     <section id="about" className="py-24 px-6 bg-white">
-      <div className="max-w-6xl mx-auto">
-        {/* Section Header */}
-        <div className="text-center mb-16">
-          <span className="inline-block text-crimson text-sm font-semibold tracking-wider uppercase mb-3">
-            About ChatCraft
-          </span>
-          <h2 className="text-4xl md:text-5xl font-extrabold text-charcoal mb-5">
-            Everything You Need to Build
-            <span className="text-crimson"> AI Chatbots</span>
-          </h2>
-          <p className="text-muted text-lg max-w-2xl mx-auto">
-            ChatCraft is a no-code platform that combines a visual builder, LLM intelligence,
-            and retrieval-augmented generation into a single, powerful tool.
-          </p>
-        </div>
-
-        {/* Feature Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {features.map((feature) => (
-            <div
-              key={feature.title}
-              className="group bg-soft-white border border-light-rose rounded-xl p-6 hover:shadow-lg transition-shadow duration-200"
-            >
-              <div className="w-12 h-12 flex items-center justify-center rounded-lg bg-light-rose text-crimson mb-4 group-hover:bg-crimson group-hover:text-white transition-colors duration-200">
-                {feature.icon}
-              </div>
-              <h3 className="text-lg font-bold text-charcoal mb-2">{feature.title}</h3>
-              <p className="text-sm text-muted leading-relaxed">{feature.description}</p>
-            </div>
-          ))}
-        </div>
-
+      <div className="max-w-4xl mx-auto">
         {/* How it works mini-flow */}
-        <div id="features" className="mt-24">
+        <div id="features">
           <div className="text-center mb-12">
-            <h3 className="text-3xl font-extrabold text-charcoal mb-4">
+            <span className="inline-block text-crimson text-sm font-semibold tracking-wider uppercase mb-3">
+              Quick Overview
+            </span>
+            <h3 className="text-3xl md:text-4xl font-extrabold text-charcoal mb-4">
               How It Works
             </h3>
             <p className="text-muted text-base max-w-xl mx-auto">
@@ -124,6 +44,72 @@ export default function AboutSection() {
             />
           </div>
         </div>
+
+        {/* Learning Project Section */}
+        <div className="mt-28">
+          <div className="text-center mb-10">
+            <span className="inline-block text-crimson text-sm font-semibold tracking-wider uppercase mb-3">
+              About This Project
+            </span>
+            <h3 className="text-3xl md:text-4xl font-extrabold text-charcoal mb-4">
+              A Learning Project
+            </h3>
+          </div>
+
+          <div className="bg-soft-white border border-light-rose rounded-2xl p-10">
+            {/* Intro */}
+            <div className="flex items-start gap-5 mb-8">
+              <div className="w-14 h-14 flex-shrink-0 flex items-center justify-center rounded-full bg-light-rose text-crimson">
+                <GraduationCap size={28} />
+              </div>
+              <div>
+                <p className="text-charcoal text-base leading-relaxed">
+                  ChatCraft is built by <span className="font-bold">Madhav Bhayani</span> as a hands-on
+                  learning project exploring modern full-stack development. The goal is to understand how
+                  no-code platforms, LLM orchestration, and RAG pipelines work by building one from scratch.
+                </p>
+              </div>
+            </div>
+
+            {/* Tech stack pills */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
+              <TechPill icon={<Code2 size={16} />} label="React + Vite" />
+              <TechPill icon={<Server size={16} />} label="Go Backend" />
+              <TechPill icon={<Brain size={16} />} label="LLM Integration" />
+              <TechPill icon={<Database size={16} />} label="RAG Pipeline" />
+            </div>
+
+            {/* Message */}
+            <p className="text-muted text-sm text-center leading-relaxed mb-8">
+              Contributions, feedback, and ideas are always welcome.
+              This project is open-source — feel free to explore, learn, and build along!
+            </p>
+
+            {/* Connect buttons */}
+            <div className="flex items-center justify-center gap-4">
+              <a
+                href="https://github.com/madhavbhayani"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 bg-charcoal text-white px-6 py-2.5 rounded-full text-sm font-semibold
+                           hover:bg-charcoal/80 transition-colors duration-200"
+              >
+                <Github size={16} />
+                GitHub
+              </a>
+              <a
+                href="https://linkedin.com/in/madhavbhayani"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 border-2 border-charcoal text-charcoal px-6 py-2.5 rounded-full text-sm font-semibold
+                           hover:bg-charcoal hover:text-white transition-colors duration-200"
+              >
+                <Linkedin size={16} />
+                LinkedIn
+              </a>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
   );
@@ -137,6 +123,15 @@ function StepCard({ step, title, description }) {
       </div>
       <h4 className="text-lg font-bold text-charcoal mb-2">{title}</h4>
       <p className="text-sm text-muted leading-relaxed">{description}</p>
+    </div>
+  );
+}
+
+function TechPill({ icon, label }) {
+  return (
+    <div className="flex items-center justify-center gap-2 bg-white border border-light-rose rounded-full px-4 py-2 text-sm font-medium text-charcoal">
+      <span className="text-crimson">{icon}</span>
+      {label}
     </div>
   );
 }

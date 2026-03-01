@@ -1,97 +1,180 @@
-import { Star, Quote } from "lucide-react";
+import { useState } from "react";
+import { ExternalLink, Mail, Type, AlignLeft, ChevronDown } from "lucide-react";
+import { toast } from "sonner";
 
-const testimonials = [
-  {
-    name: "Sarah Chen",
-    role: "Product Manager, TechFlow",
-    content:
-      "ChatCraft transformed how we handle customer support. We built a fully functional AI chatbot in under an hour — no developers needed. The RAG feature is a game-changer for our documentation.",
-    rating: 5,
-  },
-  {
-    name: "Marcus Rodriguez",
-    role: "Founder, LearnHub",
-    content:
-      "The visual flow builder is incredibly intuitive. I connected GPT-4, uploaded our course materials, and had a smart tutor bot live on our site the same day. Students love it.",
-    rating: 5,
-  },
-  {
-    name: "Priya Sharma",
-    role: "CTO, HealthBridge",
-    content:
-      "We needed a HIPAA-aware chatbot that could answer from our medical docs. ChatCraft's knowledge base upload and LLM integration made it possible without a single line of code.",
-    rating: 5,
-  },
-  {
-    name: "James Okafor",
-    role: "Marketing Lead, ShopEase",
-    content:
-      "The embed widget took us 2 minutes to put on our e-commerce site. Conversion rate on product questions went up 34%. The analytics dashboard tells us exactly what customers ask about.",
-    rating: 4,
-  },
-  {
-    name: "Elena Volkov",
-    role: "Head of Support, DataSync",
-    content:
-      "We replaced three separate tools with ChatCraft. The condition nodes and human handoff feature mean our bot handles 80% of queries and seamlessly transfers the rest to agents.",
-    rating: 5,
-  },
-  {
-    name: "David Kim",
-    role: "Freelance Developer",
-    content:
-      "I use ChatCraft for all my client projects now. Build once, customize per client, deploy everywhere. The multi-LLM support lets me pick the right model for each use case.",
-    rating: 5,
-  },
+const GITHUB_REPO_URL =
+  "https://github.com/madhavbhayani/ChatCraft-No-Code-Chatbot-Builder-LLM-Based-RAG-Direct-Integration-to-websites";
+
+const reportTypeOptions = [
+  { value: "bug", label: "Bug Report" },
+  { value: "feature", label: "Feature Request" },
+  { value: "improvement", label: "Improvement" },
+  { value: "other", label: "Other" },
 ];
 
 export default function FeedbackSection() {
+  const [form, setForm] = useState({
+    type: "bug",
+    title: "",
+    description: "",
+    email: "",
+  });
+
+  const handleChange = (e) => {
+    setForm({ ...form, [e.target.name]: e.target.value });
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+
+    if (!form.title.trim()) {
+      toast.error("Please enter a title for your report.");
+      return;
+    }
+    if (!form.description.trim()) {
+      toast.error("Please enter a description.");
+      return;
+    }
+
+    // Build labels
+    const labelMap = { bug: "bug", feature: "enhancement", improvement: "improvement", other: "question" };
+    const label = labelMap[form.type] || "bug";
+    const typeLabel = reportTypeOptions.find((o) => o.value === form.type)?.label || form.type;
+
+    // Build issue body
+    const body = [
+      `## ${typeLabel}`,
+      "",
+      `**Type:** ${typeLabel}`,
+      form.email ? `**Reporter Email:** ${form.email}` : "",
+      "",
+      "### Description",
+      form.description,
+      "",
+      "---",
+      `_Submitted via ChatCraft Feedback Form_`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    // Build GitHub new issue URL
+    const params = new URLSearchParams({
+      title: `[${form.type.toUpperCase()}] ${form.title}`,
+      body,
+      labels: label,
+    });
+
+    const issueURL = `${GITHUB_REPO_URL}/issues/new?${params.toString()}`;
+    window.open(issueURL, "_blank", "noopener,noreferrer");
+    toast.success("Opening GitHub Issues — complete the submission there!");
+  };
+
   return (
-    <section className="py-24 px-6 bg-soft-white">
-      <div className="max-w-6xl mx-auto">
+    <section id="feedback" className="py-24 px-6 bg-soft-white">
+      <div className="max-w-xl mx-auto">
         {/* Section Header */}
-        <div className="text-center mb-16">
+        <div className="text-center mb-10">
           <span className="inline-block text-crimson text-sm font-semibold tracking-wider uppercase mb-3">
-            Testimonials
+            Feedback
           </span>
-          <h2 className="text-4xl md:text-5xl font-extrabold text-charcoal mb-5">
-            Loved by Builders
-            <span className="text-crimson"> Everywhere</span>
+          <h2 className="text-3xl md:text-4xl font-extrabold text-charcoal mb-4">
+            Found a bug? Have a suggestion?
           </h2>
-          <p className="text-muted text-lg max-w-xl mx-auto">
-            See what teams and creators are saying about building chatbots with ChatCraft.
+          <p className="text-muted text-sm max-w-md mx-auto leading-relaxed">
+            Report issues or propose improvements. Your submission opens a pre-filled
+            GitHub issue — no account needed to draft it.
           </p>
         </div>
 
-        {/* Testimonial Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {testimonials.map((t) => (
-            <div
-              key={t.name}
-              className="bg-white border border-light-rose rounded-xl p-6 flex flex-col justify-between hover:shadow-lg transition-shadow duration-200"
-            >
-              <div>
-                <Quote size={24} className="text-dusty-rose mb-3" />
-                <p className="text-charcoal text-sm leading-relaxed mb-4">
-                  {t.content}
-                </p>
-              </div>
-              <div className="mt-4 pt-4 border-t border-light-rose">
-                <div className="flex items-center gap-1 mb-2">
-                  {Array.from({ length: 5 }).map((_, i) => (
-                    <Star
-                      key={i}
-                      size={14}
-                      className={i < t.rating ? "text-warning fill-warning" : "text-light-rose"}
-                    />
-                  ))}
-                </div>
-                <p className="text-sm font-bold text-charcoal">{t.name}</p>
-                <p className="text-xs text-muted">{t.role}</p>
-              </div>
+        {/* Form Card */}
+        <form
+          onSubmit={handleSubmit}
+          className="bg-white border border-light-rose rounded-2xl p-6 md:p-8 shadow-sm space-y-5"
+        >
+          {/* Report Type — Select */}
+          <div>
+            <label className="block text-sm font-medium text-charcoal mb-1.5">Report Type</label>
+            <div className="relative">
+              <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted pointer-events-none" />
+              <select
+                name="type"
+                value={form.type}
+                onChange={handleChange}
+                className="w-full appearance-none pl-4 pr-10 py-2.5 rounded-lg border border-light-rose bg-soft-white text-charcoal text-sm
+                           focus:outline-none focus:ring-2 focus:ring-crimson/30 focus:border-crimson transition cursor-pointer"
+              >
+                {reportTypeOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
             </div>
-          ))}
-        </div>
+          </div>
+
+          {/* Title */}
+          <div>
+            <label className="block text-sm font-medium text-charcoal mb-1.5">Title</label>
+            <div className="relative">
+              <Type size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+              <input
+                type="text"
+                name="title"
+                value={form.title}
+                onChange={handleChange}
+                placeholder="Brief summary of the issue or idea"
+                className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-light-rose bg-soft-white text-charcoal text-sm
+                           placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-crimson/30 focus:border-crimson transition"
+              />
+            </div>
+          </div>
+
+          {/* Description */}
+          <div>
+            <label className="block text-sm font-medium text-charcoal mb-1.5">Description</label>
+            <div className="relative">
+              <AlignLeft size={16} className="absolute left-3 top-3 text-muted" />
+              <textarea
+                name="description"
+                value={form.description}
+                onChange={handleChange}
+                rows={4}
+                placeholder="Describe the bug, steps to reproduce, or the feature you'd like to see..."
+                className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-light-rose bg-soft-white text-charcoal text-sm
+                           placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-crimson/30 focus:border-crimson transition resize-none"
+              />
+            </div>
+          </div>
+
+          {/* Email (optional) */}
+          <div>
+            <label className="block text-sm font-medium text-charcoal mb-1.5">
+              Email <span className="text-muted font-normal">(optional)</span>
+            </label>
+            <div className="relative">
+              <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+              <input
+                type="email"
+                name="email"
+                value={form.email}
+                onChange={handleChange}
+                placeholder="you@example.com"
+                className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-light-rose bg-soft-white text-charcoal text-sm
+                           placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-crimson/30 focus:border-crimson transition"
+              />
+            </div>
+          </div>
+
+          {/* Submit */}
+          <button
+            type="submit"
+            className="w-full flex items-center justify-center gap-2 bg-crimson text-white py-3 rounded-full font-semibold text-sm
+                       hover:bg-rose-pink transition-all duration-200 cursor-pointer shadow-lg shadow-crimson/25 mt-2"
+          >
+            <ExternalLink size={16} />
+            Open Issue on GitHub
+          </button>
+        </form>
       </div>
     </section>
   );

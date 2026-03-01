@@ -1,76 +1,31 @@
-import { Github, Twitter, Heart } from "lucide-react";
+import { Heart } from "lucide-react";
 
 export default function Footer() {
   return (
-    <footer className="bg-charcoal text-white py-12 px-6">
-      <div className="max-w-6xl mx-auto">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-10 mb-10">
-          {/* Brand */}
-          <div>
-            <h3 className="text-xl font-extrabold mb-3">
-              Chat<span className="text-crimson">Craft</span>
-            </h3>
-            <p className="text-sm text-dusty-rose leading-relaxed">
-              No-code chatbot builder with LLM integration &amp; RAG.
-              Design, train, and deploy AI-powered bots directly on your website.
-            </p>
-          </div>
+    <footer className="bg-charcoal py-16 px-6">
+      <div className="max-w-6xl mx-auto text-center">
+        {/* Large brand name with crimson gradient */}
+        <h2
+          className="text-6xl md:text-8xl lg:text-9xl font-black tracking-tighter select-none leading-none mb-6 bg-clip-text text-transparent"
+          style={{
+            backgroundImage: "linear-gradient(180deg, #DC2626 0%, #DC262640 70%, #DC262615 100%)",
+          }}
+        >
+          CHATCRAFT
+        </h2>
 
-          {/* Links */}
-          <div>
-            <h4 className="text-sm font-semibold text-dusty-rose uppercase tracking-wider mb-4">
-              Quick Links
-            </h4>
-            <ul className="space-y-2 text-sm">
-              <li>
-                <a href="#about" className="text-white/70 hover:text-white transition-colors">
-                  About
-                </a>
-              </li>
-              <li>
-                <a href="#features" className="text-white/70 hover:text-white transition-colors">
-                  Features
-                </a>
-              </li>
-              <li>
-                <a href="/register" className="text-white/70 hover:text-white transition-colors">
-                  Sign Up
-                </a>
-              </li>
-            </ul>
-          </div>
-
-          {/* Social */}
-          <div>
-            <h4 className="text-sm font-semibold text-dusty-rose uppercase tracking-wider mb-4">
-              Connect
-            </h4>
-            <div className="flex items-center gap-4">
-              <a
-                href="https://github.com/madhavbhayani/ChatCraft-No-Code-Chatbot-Builder-LLM-Based-RAG-Direct-Integration-to-websites"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-white/70 hover:text-white transition-colors"
-              >
-                <Github size={20} />
-              </a>
-              <a
-                href="#"
-                className="text-white/70 hover:text-white transition-colors"
-              >
-                <Twitter size={20} />
-              </a>
-            </div>
-          </div>
-        </div>
+        {/* Subtitle */}
+        <p className="text-sm text-dusty-rose mb-10">
+          a learning project by <span className="font-semibold text-white/70">Madhav Bhayani</span>
+        </p>
 
         {/* Divider + Copyright */}
         <div className="border-t border-white/10 pt-6 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <p className="text-xs text-white/50">
-            &copy; {new Date().getFullYear()} ChatCraft. All rights reserved.
+          <p className="text-xs text-white/40">
+            Built with <Heart size={10} className="text-crimson inline-block mx-0.5" /> by Madhav
           </p>
-          <p className="text-xs text-white/50 flex items-center gap-1">
-            Made with <Heart size={12} className="text-crimson" /> by Madhav Bhayani
+          <p className="text-xs text-white/40">
+            &copy; {new Date().getFullYear()} ChatCraft. All rights reserved.
           </p>
         </div>
       </div>
