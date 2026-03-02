@@ -55,6 +55,34 @@ var migrations = []struct {
 			);
 		`,
 	},
+	{
+		Name: "004_create_projects",
+		SQL: `
+			CREATE TABLE IF NOT EXISTS projects (
+				id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+				user_id       UUID         NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+				name          VARCHAR(255) NOT NULL,
+				description   TEXT         DEFAULT '',
+				status        VARCHAR(20)  NOT NULL DEFAULT 'draft',
+				created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+				updated_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+				CONSTRAINT uq_projects_user_id UNIQUE (user_id)
+			);
+			CREATE INDEX IF NOT EXISTS idx_projects_user_id ON projects(user_id);
+		`,
+	},
+	{
+		Name: "005_add_auth_fields",
+		SQL: `
+			ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_method VARCHAR(20) NOT NULL DEFAULT 'email';
+			ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id VARCHAR(255);
+			ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT false;
+			ALTER TABLE users ADD COLUMN IF NOT EXISTS otp_code VARCHAR(6);
+			ALTER TABLE users ADD COLUMN IF NOT EXISTS otp_expires_at TIMESTAMPTZ;
+			ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL;
+			CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id) WHERE google_id IS NOT NULL;
+		`,
+	},
 }
 
 // RunMigrations applies all pending migrations.

@@ -3,14 +3,52 @@ import { LogIn, Mail, Lock, ArrowLeft } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { saveSession } from "../utils/auth";
+import { signInWithGoogle } from "../firebase";
+import GoogleSignInButton from "../components/GoogleSignInButton";
 
 export default function LoginPage() {
   const navigate = useNavigate();
   const [form, setForm] = useState({ email: "", password: "" });
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
 
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
+  };
+
+  const handleGoogleSignIn = async () => {
+    setGoogleLoading(true);
+    try {
+      const { idToken, user: firebaseUser } = await signInWithGoogle();
+
+      const res = await fetch("/api/v1/auth/google", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id_token: idToken }),
+      });
+
+      const text = await res.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error("Server returned an invalid response. Is the backend running?");
+      }
+
+      if (!res.ok) {
+        throw new Error(data.error || "Google sign-in failed");
+      }
+
+      saveSession(data.token, data.user);
+      toast.success("Signed in with Google!");
+      navigate("/dashboard");
+    } catch (err) {
+      if (err.code !== "auth/popup-closed-by-user") {
+        toast.error(err.message || "Google sign-in failed.");
+      }
+    } finally {
+      setGoogleLoading(false);
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -43,7 +81,7 @@ export default function LoginPage() {
 
       saveSession(data.token, data.user);
       toast.success("Logged in successfully!");
-      navigate("/");
+      navigate("/dashboard");
     } catch (err) {
       toast.error(err.message || "Something went wrong.");
     } finally {
@@ -76,6 +114,18 @@ export default function LoginPage() {
           onSubmit={handleSubmit}
           className="bg-white border border-light-rose rounded-xl p-8 shadow-sm"
         >
+          {/* Google Sign-In */}
+          <div className="mb-6">
+            <GoogleSignInButton onClick={handleGoogleSignIn} loading={googleLoading} />
+          </div>
+
+          {/* Divider */}
+          <div className="flex items-center gap-3 mb-6">
+            <div className="flex-1 h-px bg-light-rose"></div>
+            <span className="text-xs text-muted font-medium uppercase tracking-wider">or</span>
+            <div className="flex-1 h-px bg-light-rose"></div>
+          </div>
+
           {/* Email */}
           <div className="mb-5">
             <label className="block text-sm font-medium text-charcoal mb-1.5">Email</label>

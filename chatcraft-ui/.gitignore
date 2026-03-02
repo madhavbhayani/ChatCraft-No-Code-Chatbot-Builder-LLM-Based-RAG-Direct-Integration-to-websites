@@ -23,6 +23,7 @@ firebase-debug.log
 .firebaserc
 firestore.rules
 firestore.indexes.json
+firebase.json
 
 # Editor directories and files
 .vscode/*

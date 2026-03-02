@@ -73,17 +73,19 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 
 	// Insert user
 	user := model.User{
-		ID:        uuid.New().String(),
-		Name:      req.Name,
-		Email:     req.Email,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		ID:            uuid.New().String(),
+		Name:          req.Name,
+		Email:         req.Email,
+		AuthMethod:    "email",
+		EmailVerified: false,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
 	}
 
 	_, err = h.DB.Pool.Exec(r.Context(),
-		`INSERT INTO users (id, name, email, password_hash, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6)`,
-		user.ID, user.Name, user.Email, string(hash), user.CreatedAt, user.UpdatedAt,
+		`INSERT INTO users (id, name, email, password_hash, auth_method, email_verified, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		user.ID, user.Name, user.Email, string(hash), user.AuthMethod, user.EmailVerified, user.CreatedAt, user.UpdatedAt,
 	)
 	if err != nil {
 		if strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "unique") {
@@ -95,8 +97,8 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: Generate a real JWT token
-	token := "placeholder-jwt-token"
+	// Use user ID as token (placeholder until JWT is implemented)
+	token := user.ID
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -122,24 +124,28 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	// Fetch user
 	var user model.User
-	var passwordHash string
+	var passwordHash *string
 	err := h.DB.Pool.QueryRow(r.Context(),
-		`SELECT id, name, email, password_hash, created_at, updated_at FROM users WHERE email = $1`,
+		`SELECT id, name, email, password_hash, auth_method, COALESCE(google_id, ''), email_verified, created_at, updated_at FROM users WHERE email = $1`,
 		req.Email,
-	).Scan(&user.ID, &user.Name, &user.Email, &passwordHash, &user.CreatedAt, &user.UpdatedAt)
+	).Scan(&user.ID, &user.Name, &user.Email, &passwordHash, &user.AuthMethod, &user.GoogleID, &user.EmailVerified, &user.CreatedAt, &user.UpdatedAt)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "Invalid email or password")
 		return
 	}
 
 	// Verify password
-	if err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(req.Password)); err != nil {
+	if passwordHash == nil || *passwordHash == "" {
+		writeError(w, http.StatusUnauthorized, "This account uses Google sign-in. Please use the Google button.")
+		return
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(*passwordHash), []byte(req.Password)); err != nil {
 		writeError(w, http.StatusUnauthorized, "Invalid email or password")
 		return
 	}
 
-	// TODO: Generate a real JWT token
-	token := "placeholder-jwt-token"
+	// Use user ID as token (placeholder until JWT is implemented)
+	token := user.ID
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(AuthResponse{
@@ -148,7 +154,28 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// writeError sends a JSON error response.
+// Me returns the currently authenticated user.
+// GET /api/v1/auth/me
+func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
+	userID := r.Header.Get("X-User-ID")
+	if userID == "" {
+		writeError(w, http.StatusUnauthorized, "Authentication required")
+		return
+	}
+
+	var user model.User
+	err := h.DB.Pool.QueryRow(r.Context(),
+		`SELECT id, name, email, auth_method, google_id, email_verified, created_at, updated_at FROM users WHERE id = $1`,
+		userID,
+	).Scan(&user.ID, &user.Name, &user.Email, &user.AuthMethod, &user.GoogleID, &user.EmailVerified, &user.CreatedAt, &user.UpdatedAt)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "User not found")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"user": user})
+}
 func writeError(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)

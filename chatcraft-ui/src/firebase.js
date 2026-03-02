@@ -1,5 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getAnalytics, isSupported } from "firebase/analytics";
+import { getAuth, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -22,4 +23,26 @@ isSupported().then((supported) => {
   }
 });
 
-export { app, analytics };
+// Initialize Auth
+const auth = getAuth(app);
+const googleProvider = new GoogleAuthProvider();
+
+/**
+ * Sign in with Google via Firebase popup.
+ * Returns the Firebase ID token to send to our backend.
+ */
+export async function signInWithGoogle() {
+  const result = await signInWithPopup(auth, googleProvider);
+  const idToken = await result.user.getIdToken();
+  return {
+    idToken,
+    user: {
+      uid: result.user.uid,
+      email: result.user.email,
+      displayName: result.user.displayName,
+      photoURL: result.user.photoURL,
+    },
+  };
+}
+
+export { app, analytics, auth };
