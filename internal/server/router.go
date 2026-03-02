@@ -25,6 +25,8 @@ func NewRouter(db *database.DB) http.Handler {
 	mux.HandleFunc("POST /api/v1/auth/google", googleHandler.GoogleAuth)
 	mux.HandleFunc("POST /api/v1/auth/send-otp", googleHandler.SendOTP)
 	mux.HandleFunc("POST /api/v1/auth/verify-otp", googleHandler.VerifyOTP)
+	mux.HandleFunc("POST /api/v1/auth/forgot-password", googleHandler.ForgotPassword)
+	mux.HandleFunc("POST /api/v1/auth/reset-password", googleHandler.ResetPassword)
 
 	// --- Protected routes (require auth) ---
 	authMw := middleware.Auth(db)
@@ -44,6 +46,7 @@ func NewRouter(db *database.DB) http.Handler {
 	mux.Handle("POST /api/v1/account/setup-password", authMw(http.HandlerFunc(googleHandler.SetupPassword)))
 	mux.Handle("POST /api/v1/account/change-email", authMw(http.HandlerFunc(googleHandler.ChangeEmail)))
 	mux.Handle("POST /api/v1/account/confirm-email", authMw(http.HandlerFunc(googleHandler.ConfirmChangeEmail)))
+	mux.Handle("DELETE /api/v1/account", authMw(http.HandlerFunc(googleHandler.DeleteAccount)))
 
 	// Apply middleware stack
 	var h http.Handler = mux

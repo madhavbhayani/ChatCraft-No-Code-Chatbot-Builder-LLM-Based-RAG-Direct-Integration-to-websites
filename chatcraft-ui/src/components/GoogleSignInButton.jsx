@@ -1,12 +1,8 @@
-import { useState } from "react";
-
 /**
- * Google Sign-In button with animated gradient border on hover.
+ * Google Sign-In button with constantly animated gradient border.
  * Uses Google brand colors: #4285f4, #34a853, #fbbc05, #ea4335
  */
 export default function GoogleSignInButton({ onClick, loading = false, label = "Continue with Google" }) {
-  const [hovering, setHovering] = useState(false);
-
   return (
     <>
       <style>{`
@@ -19,10 +15,6 @@ export default function GoogleSignInButton({ onClick, loading = false, label = "
           position: relative;
           border-radius: 0.5rem;
           padding: 2px;
-          background: #e5e7eb;
-          transition: all 0.3s ease;
-        }
-        .google-btn-wrapper.active {
           background: linear-gradient(270deg, #4285f4, #34a853, #fbbc05, #ea4335, #4285f4, #34a853);
           background-size: 400% 400%;
           animation: google-gradient-spin 3s ease infinite;
@@ -52,11 +44,7 @@ export default function GoogleSignInButton({ onClick, loading = false, label = "
         }
       `}</style>
 
-      <div
-        className={`google-btn-wrapper ${hovering || loading ? "active" : ""}`}
-        onMouseEnter={() => setHovering(true)}
-        onMouseLeave={() => setHovering(false)}
-      >
+      <div className="google-btn-wrapper">
         <button
           type="button"
           onClick={onClick}
@@ -76,3 +64,4 @@ export default function GoogleSignInButton({ onClick, loading = false, label = "
     </>
   );
 }
+

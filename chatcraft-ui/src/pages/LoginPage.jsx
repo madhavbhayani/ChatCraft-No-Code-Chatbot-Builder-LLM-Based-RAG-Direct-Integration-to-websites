@@ -144,7 +144,7 @@ export default function LoginPage() {
           </div>
 
           {/* Password */}
-          <div className="mb-6">
+          <div className="mb-2">
             <label className="block text-sm font-medium text-charcoal mb-1.5">Password</label>
             <div className="relative">
               <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
@@ -158,6 +158,13 @@ export default function LoginPage() {
                            placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-crimson/30 focus:border-crimson transition"
               />
             </div>
+          </div>
+
+          {/* Forgot Password */}
+          <div className="text-right mb-6">
+            <a href="/forgot-password" className="text-xs text-crimson font-medium hover:underline">
+              Forgot Password?
+            </a>
           </div>
 
           {/* Submit */}

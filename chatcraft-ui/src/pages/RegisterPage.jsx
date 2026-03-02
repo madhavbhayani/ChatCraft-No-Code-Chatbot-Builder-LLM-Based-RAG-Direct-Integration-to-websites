@@ -93,8 +93,8 @@ export default function RegisterPage() {
 
       // Auto-login after registration
       saveSession(data.token, data.user);
-      toast.success("Account created successfully!");
-      navigate("/dashboard");
+      toast.success("Account created! Please verify your email.");
+      navigate("/verify-email", { state: { email: form.email } });
     } catch (err) {
       toast.error(err.message || "Something went wrong.");
     } finally {
@@ -113,7 +113,7 @@ export default function RegisterPage() {
         Back
       </button>
 
-      <div className="w-full max-w-md">
+      <div className="w-full max-w-2xl">
         {/* Logo */}
         <div className="text-center mb-8">
           <h1 className="text-3xl font-extrabold text-charcoal">
@@ -139,71 +139,73 @@ export default function RegisterPage() {
             <div className="flex-1 h-px bg-light-rose"></div>
           </div>
 
-          {/* Name */}
-          <div className="mb-5">
-            <label className="block text-sm font-medium text-charcoal mb-1.5">Full Name</label>
-            <div className="relative">
-              <User size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-              <input
-                type="text"
-                name="name"
-                value={form.name}
-                onChange={handleChange}
-                placeholder="John Doe"
-                className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-light-rose bg-soft-white text-charcoal text-sm
-                           placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-crimson/30 focus:border-crimson transition"
-              />
+          {/* Row 1: Name + Email */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-5">
+            <div>
+              <label className="block text-sm font-medium text-charcoal mb-1.5">Full Name</label>
+              <div className="relative">
+                <User size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+                <input
+                  type="text"
+                  name="name"
+                  value={form.name}
+                  onChange={handleChange}
+                  placeholder="John Doe"
+                  className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-light-rose bg-soft-white text-charcoal text-sm
+                             placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-crimson/30 focus:border-crimson transition"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-charcoal mb-1.5">Email</label>
+              <div className="relative">
+                <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+                <input
+                  type="email"
+                  name="email"
+                  value={form.email}
+                  onChange={handleChange}
+                  placeholder="you@example.com"
+                  className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-light-rose bg-soft-white text-charcoal text-sm
+                             placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-crimson/30 focus:border-crimson transition"
+                />
+              </div>
             </div>
           </div>
 
-          {/* Email */}
-          <div className="mb-5">
-            <label className="block text-sm font-medium text-charcoal mb-1.5">Email</label>
-            <div className="relative">
-              <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-              <input
-                type="email"
-                name="email"
-                value={form.email}
-                onChange={handleChange}
-                placeholder="you@example.com"
-                className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-light-rose bg-soft-white text-charcoal text-sm
-                           placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-crimson/30 focus:border-crimson transition"
-              />
+          {/* Row 2: Password + Confirm */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-6">
+            <div>
+              <label className="block text-sm font-medium text-charcoal mb-1.5">Password</label>
+              <div className="relative">
+                <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+                <input
+                  type="password"
+                  name="password"
+                  value={form.password}
+                  onChange={handleChange}
+                  placeholder="Min. 8 characters"
+                  className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-light-rose bg-soft-white text-charcoal text-sm
+                             placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-crimson/30 focus:border-crimson transition"
+                />
+              </div>
             </div>
-          </div>
 
-          {/* Password */}
-          <div className="mb-5">
-            <label className="block text-sm font-medium text-charcoal mb-1.5">Password</label>
-            <div className="relative">
-              <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-              <input
-                type="password"
-                name="password"
-                value={form.password}
-                onChange={handleChange}
-                placeholder="Min. 8 characters"
-                className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-light-rose bg-soft-white text-charcoal text-sm
-                           placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-crimson/30 focus:border-crimson transition"
-              />
-            </div>
-          </div>
-
-          {/* Confirm Password */}
-          <div className="mb-6">
-            <label className="block text-sm font-medium text-charcoal mb-1.5">Confirm Password</label>
-            <div className="relative">
-              <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-              <input
-                type="password"
-                name="confirmPassword"
-                value={form.confirmPassword}
-                onChange={handleChange}
-                placeholder="Repeat your password"
-                className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-light-rose bg-soft-white text-charcoal text-sm
-                           placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-crimson/30 focus:border-crimson transition"
-              />
+            <div>
+              <label className="block text-sm font-medium text-charcoal mb-1.5">Confirm Password</label>
+              <div className="relative">
+                <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+                <input
+                  type="password"
+                  name="confirmPassword"
+                  value={form.confirmPassword}
+                  onChange={handleChange}
+                  placeholder="Repeat your password"
+                  className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-light-rose bg-soft-white text-charcoal text-sm
+                             placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-crimson/30 focus:border-crimson transition"
+                />
+              </div>
             </div>
           </div>
 

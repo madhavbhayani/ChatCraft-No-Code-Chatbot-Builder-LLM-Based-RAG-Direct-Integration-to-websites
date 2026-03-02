@@ -638,3 +638,175 @@ func (h *GoogleHandler) GetAccountInfo(w http.ResponseWriter, r *http.Request) {
 		"has_google":   user.GoogleID != nil && *user.GoogleID != "",
 	})
 }
+
+// --- Forgot Password ---
+
+// ForgotPasswordRequest is the JSON body for POST /api/v1/auth/forgot-password.
+type ForgotPasswordRequest struct {
+	Email string `json:"email"`
+}
+
+// ForgotPassword sends an OTP to reset the user's password.
+func (h *GoogleHandler) ForgotPassword(w http.ResponseWriter, r *http.Request) {
+	var req ForgotPasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
+	if req.Email == "" {
+		writeError(w, http.StatusBadRequest, "Email is required")
+		return
+	}
+
+	// Check user exists and has a password
+	var userID string
+	var passwordHash *string
+	err := h.DB.Pool.QueryRow(r.Context(),
+		`SELECT id, password_hash FROM users WHERE email = $1`, req.Email,
+	).Scan(&userID, &passwordHash)
+	if err != nil {
+		// Don't reveal whether the email exists
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"message": "If an account with this email exists, a reset code has been sent."})
+		return
+	}
+
+	if passwordHash == nil || *passwordHash == "" {
+		// Google-only user — can't reset password that doesn't exist
+		writeError(w, http.StatusBadRequest, "This account uses Google sign-in. Please use the Google button to log in.")
+		return
+	}
+
+	otp := fmt.Sprintf("%06d", rand.Intn(1000000))
+	expiresAt := time.Now().Add(10 * time.Minute)
+
+	_, err = h.DB.Pool.Exec(r.Context(),
+		`UPDATE users SET otp_code = $1, otp_expires_at = $2, updated_at = $3 WHERE id = $4`,
+		otp, expiresAt, time.Now(), userID,
+	)
+	if err != nil {
+		log.Printf("[forgot-password] otp store error: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to generate reset code")
+		return
+	}
+
+	if err := sendOTPEmail(req.Email, otp); err != nil {
+		log.Printf("[forgot-password] email send error: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to send reset code")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"message": "If an account with this email exists, a reset code has been sent."})
+}
+
+// ResetPasswordRequest is the JSON body for POST /api/v1/auth/reset-password.
+type ResetPasswordRequest struct {
+	Email       string `json:"email"`
+	OTP         string `json:"otp"`
+	NewPassword string `json:"new_password"`
+}
+
+// ResetPassword verifies the OTP and sets a new password.
+func (h *GoogleHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
+	var req ResetPasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
+	if req.Email == "" || req.OTP == "" || req.NewPassword == "" {
+		writeError(w, http.StatusBadRequest, "Email, OTP, and new password are required")
+		return
+	}
+
+	if len(req.NewPassword) < 8 {
+		writeError(w, http.StatusBadRequest, "Password must be at least 8 characters")
+		return
+	}
+
+	var storedOTP *string
+	var expiresAt *time.Time
+	err := h.DB.Pool.QueryRow(r.Context(),
+		`SELECT otp_code, otp_expires_at FROM users WHERE email = $1`, req.Email,
+	).Scan(&storedOTP, &expiresAt)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "No account found with this email")
+		return
+	}
+
+	if storedOTP == nil || *storedOTP != req.OTP {
+		writeError(w, http.StatusBadRequest, "Invalid reset code")
+		return
+	}
+	if expiresAt == nil || time.Now().After(*expiresAt) {
+		writeError(w, http.StatusBadRequest, "Reset code has expired. Please request a new one.")
+		return
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		log.Printf("[reset-password] bcrypt error: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to process password")
+		return
+	}
+
+	_, err = h.DB.Pool.Exec(r.Context(),
+		`UPDATE users SET password_hash = $1, otp_code = NULL, otp_expires_at = NULL, updated_at = $2 WHERE email = $3`,
+		string(hash), time.Now(), req.Email,
+	)
+	if err != nil {
+		log.Printf("[reset-password] update error: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to reset password")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"message": "Password reset successfully. You can now log in."})
+}
+
+// --- Delete Account ---
+
+// DeleteAccount removes the user and all associated data.
+func (h *GoogleHandler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
+	userID := r.Header.Get("X-User-ID")
+	if userID == "" {
+		writeError(w, http.StatusUnauthorized, "Authentication required")
+		return
+	}
+
+	ctx := r.Context()
+
+	// Delete in order: projects → bots → user (foreign keys cascade, but explicit is safer)
+	_, err := h.DB.Pool.Exec(ctx, `DELETE FROM projects WHERE user_id = $1`, userID)
+	if err != nil {
+		log.Printf("[delete-account] projects delete error: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to delete account data")
+		return
+	}
+
+	_, err = h.DB.Pool.Exec(ctx, `DELETE FROM bots WHERE user_id = $1`, userID)
+	if err != nil {
+		log.Printf("[delete-account] bots delete error: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to delete account data")
+		return
+	}
+
+	result, err := h.DB.Pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
+	if err != nil {
+		log.Printf("[delete-account] user delete error: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to delete account")
+		return
+	}
+
+	if result.RowsAffected() == 0 {
+		writeError(w, http.StatusNotFound, "User not found")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"message": "Account deleted successfully"})
+}

@@ -42,13 +42,13 @@ export default function HeroSection() {
             Get Started Free
             <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform duration-200" />
           </button>
-          <a
-            href="#features"
+          <button
+            onClick={() => navigate("/docs")}
             className="flex items-center gap-2 border-2 border-charcoal text-charcoal px-8 py-3.5 rounded-full font-semibold text-base
-                       hover:bg-charcoal hover:text-white transition-all duration-200"
+                       hover:bg-charcoal hover:text-white transition-all duration-200 cursor-pointer"
           >
-            See How It Works
-          </a>
+            View Docs
+          </button>
         </div>
       </div>
     </section>
