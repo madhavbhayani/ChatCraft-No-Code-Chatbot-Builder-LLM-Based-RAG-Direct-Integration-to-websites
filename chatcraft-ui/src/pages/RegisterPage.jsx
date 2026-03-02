@@ -2,6 +2,7 @@ import { useState } from "react";
 import { UserPlus, Mail, Lock, User, ArrowLeft } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { saveSession } from "../utils/auth";
 
 export default function RegisterPage() {
   const navigate = useNavigate();
@@ -30,7 +31,6 @@ export default function RegisterPage() {
 
     setLoading(true);
     try {
-      // TODO: Replace with actual API call
       const res = await fetch("/api/v1/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -41,13 +41,22 @@ export default function RegisterPage() {
         }),
       });
 
+      const text = await res.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error("Server returned an invalid response. Is the backend running?");
+      }
+
       if (!res.ok) {
-        const data = await res.json();
         throw new Error(data.error || "Registration failed");
       }
 
+      // Auto-login after registration
+      saveSession(data.token, data.user);
       toast.success("Account created successfully!");
-      navigate("/login");
+      navigate("/");
     } catch (err) {
       toast.error(err.message || "Something went wrong.");
     } finally {

@@ -1,0 +1,31 @@
+{
+  "hosting": {
+    "public": "dist",
+    "site": "chatcraft",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  },
+  "firestore": {
+    "database": "(default)",
+    "location": "asia-south1",
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "auth": {
+    "providers": {
+      "googleSignIn": {
+        "oAuthBrandDisplayName": "ChatCraft",
+        "supportEmail": "madhavbhayani21@gmail.com"
+      }
+    }
+  }
+}

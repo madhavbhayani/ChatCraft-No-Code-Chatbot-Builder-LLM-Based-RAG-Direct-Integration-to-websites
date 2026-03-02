@@ -2,6 +2,7 @@ import { useState } from "react";
 import { LogIn, Mail, Lock, ArrowLeft } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { saveSession } from "../utils/auth";
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -22,23 +23,27 @@ export default function LoginPage() {
 
     setLoading(true);
     try {
-      // TODO: Replace with actual API call
       const res = await fetch("/api/v1/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
       });
 
+      const text = await res.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error("Server returned an invalid response. Is the backend running?");
+      }
+
       if (!res.ok) {
-        const data = await res.json();
         throw new Error(data.error || "Login failed");
       }
 
-      const data = await res.json();
-      // TODO: Store token in auth store
-      localStorage.setItem("token", data.token);
+      saveSession(data.token, data.user);
       toast.success("Logged in successfully!");
-      navigate("/dashboard");
+      navigate("/");
     } catch (err) {
       toast.error(err.message || "Something went wrong.");
     } finally {

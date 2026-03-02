@@ -1,6 +1,19 @@
 import { ArrowRight } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { isLoggedIn } from "../../utils/auth";
 
 export default function HeroSection() {
+  const navigate = useNavigate();
+
+  const handleGetStarted = (e) => {
+    e.preventDefault();
+    if (isLoggedIn()) {
+      navigate("/dashboard");
+    } else {
+      navigate("/login");
+    }
+  };
+
   return (
     <section className="min-h-screen flex flex-col items-center justify-center px-6 py-24 bg-soft-white relative overflow-hidden">
       {/* Decorative background elements */}
@@ -21,14 +34,14 @@ export default function HeroSection() {
 
         {/* CTA Buttons */}
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-          <a
-            href="#about"
+          <button
+            onClick={handleGetStarted}
             className="group flex items-center gap-2 bg-crimson text-white px-8 py-3.5 rounded-full font-semibold text-base
-                       hover:bg-rose-pink transition-all duration-200 shadow-lg shadow-crimson/25"
+                       hover:bg-rose-pink transition-all duration-200 shadow-lg shadow-crimson/25 cursor-pointer"
           >
             Get Started Free
             <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform duration-200" />
-          </a>
+          </button>
           <a
             href="#features"
             className="flex items-center gap-2 border-2 border-charcoal text-charcoal px-8 py-3.5 rounded-full font-semibold text-base
