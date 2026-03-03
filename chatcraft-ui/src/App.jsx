@@ -9,6 +9,8 @@ import AccountPage from "./pages/AccountPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
 import DocsPage from "./pages/DocsPage";
+import IntegratePage from "./pages/IntegratePage";
+import ConsoleRedirect from "./pages/ConsoleRedirect";
 
 function App() {
   return (
@@ -33,6 +35,8 @@ function App() {
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/docs" element={<DocsPage />} />
+        <Route path="/console" element={<ConsoleRedirect />} />
+        <Route path="/console/integrate/:projectId" element={<IntegratePage />} />
       </Routes>
     </BrowserRouter>
   );

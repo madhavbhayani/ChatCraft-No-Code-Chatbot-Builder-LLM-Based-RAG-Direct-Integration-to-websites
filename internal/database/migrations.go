@@ -132,6 +132,65 @@ var migrations = []struct {
 			CREATE INDEX IF NOT EXISTS idx_chunks_project_id ON chunks(project_id);
 		`,
 	},
+	{
+		Name: "010_create_crawl_jobs",
+		SQL: `
+			CREATE TABLE IF NOT EXISTS crawl_jobs (
+				id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+				project_id     UUID REFERENCES projects(id) ON DELETE CASCADE,
+				status         TEXT DEFAULT 'queued',
+				total_urls     INT DEFAULT 0,
+				crawled_urls   INT DEFAULT 0,
+				skipped_urls   INT DEFAULT 0,
+				chunks_created INT DEFAULT 0,
+				error_message  TEXT,
+				started_at     TIMESTAMPTZ DEFAULT NOW(),
+				finished_at    TIMESTAMPTZ
+			);
+			CREATE INDEX IF NOT EXISTS idx_crawl_jobs_project_id ON crawl_jobs(project_id);
+		`,
+	},
+	{
+		Name: "011_create_embed_jobs",
+		SQL: `
+			CREATE TABLE IF NOT EXISTS embed_jobs (
+				id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+				project_id    UUID REFERENCES projects(id) ON DELETE CASCADE,
+				status        TEXT DEFAULT 'queued',
+				total_chunks  INT DEFAULT 0,
+				embedded      INT DEFAULT 0,
+				failed        INT DEFAULT 0,
+				error_message TEXT,
+				started_at    TIMESTAMPTZ DEFAULT NOW(),
+				finished_at   TIMESTAMPTZ
+			);
+			CREATE INDEX IF NOT EXISTS idx_embed_jobs_project_id ON embed_jobs(project_id);
+		`,
+	},
+	{
+		Name: "013_add_crawl_job_logs",
+		SQL: `
+			ALTER TABLE crawl_jobs ADD COLUMN IF NOT EXISTS current_phase TEXT DEFAULT '';
+			ALTER TABLE crawl_jobs ADD COLUMN IF NOT EXISTS recent_logs JSONB DEFAULT '[]';
+		`,
+	},
+	{
+		Name: "012_create_conversations",
+		SQL: `
+			CREATE TABLE IF NOT EXISTS conversations (
+				id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+				project_id   UUID REFERENCES projects(id) ON DELETE CASCADE,
+				session_id   TEXT NOT NULL,
+				user_message TEXT NOT NULL,
+				bot_answer   TEXT NOT NULL,
+				confidence   FLOAT,
+				fallback     BOOLEAN DEFAULT false,
+				created_at   TIMESTAMPTZ DEFAULT NOW()
+			);
+			CREATE INDEX IF NOT EXISTS idx_conversations_project_id ON conversations(project_id);
+			CREATE INDEX IF NOT EXISTS idx_conversations_session_id ON conversations(session_id);
+		`,
+	},
 }
 
 // RunMigrations applies all pending migrations.

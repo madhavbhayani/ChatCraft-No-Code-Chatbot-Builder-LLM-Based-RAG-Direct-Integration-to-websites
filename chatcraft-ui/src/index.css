@@ -46,3 +46,19 @@ html {
   background-color: var(--color-dusty-rose);
   color: var(--color-charcoal);
 }
+
+/* Slide-in animation for page transitions */
+@keyframes slideInRight {
+  from {
+    transform: translateX(40px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-in-right {
+  animation: slideInRight 0.35s ease-out;
+}

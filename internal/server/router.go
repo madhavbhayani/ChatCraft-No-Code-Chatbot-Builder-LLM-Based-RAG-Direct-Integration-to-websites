@@ -52,10 +52,16 @@ func NewRouter(db *database.DB) http.Handler {
 	botBuilder := handler.NewBotBuilderHandler(db)
 	mux.Handle("GET /api/v1/console/status/{project_id}", authMw(http.HandlerFunc(botBuilder.GetSetupStatus)))
 	mux.Handle("POST /api/v1/console/crawl/{project_id}", authMw(http.HandlerFunc(botBuilder.CrawlWebsite)))
+	mux.Handle("GET /api/v1/console/crawl-status/{job_id}", authMw(http.HandlerFunc(botBuilder.GetCrawlJobStatus)))
 	mux.Handle("POST /api/v1/console/chunk/{project_id}", authMw(http.HandlerFunc(botBuilder.ChunkDocuments)))
 	mux.Handle("POST /api/v1/console/upload/{project_id}", authMw(http.HandlerFunc(botBuilder.UploadFile)))
 	mux.Handle("POST /api/v1/console/api-key/{project_id}", authMw(http.HandlerFunc(botBuilder.SaveAPIKey)))
 	mux.Handle("POST /api/v1/console/embed/{project_id}", authMw(http.HandlerFunc(botBuilder.EmbedChunks)))
+	mux.Handle("GET /api/v1/console/embed-status/{job_id}", authMw(http.HandlerFunc(botBuilder.GetEmbedJobStatus)))
+
+	// Chat endpoint (public — no auth, called from embedded widgets)
+	chatHandler := handler.NewChatHandler(db)
+	mux.HandleFunc("POST /api/v1/chat/{bot_token}", chatHandler.Chat)
 
 	// Apply middleware stack
 	var h http.Handler = mux

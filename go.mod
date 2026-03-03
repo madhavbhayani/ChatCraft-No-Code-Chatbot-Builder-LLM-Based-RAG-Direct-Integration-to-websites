@@ -40,6 +40,7 @@ require (
 	github.com/go-jose/go-jose/v4 v4.0.5 // indirect
 	github.com/go-logr/logr v1.4.2 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
+	github.com/go-rod/rod v0.116.2 // indirect
 	github.com/gobwas/glob v0.2.3 // indirect
 	github.com/gocolly/colly/v2 v2.3.0 // indirect
 	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
@@ -61,6 +62,11 @@ require (
 	github.com/saintfish/chardet v0.0.0-20230101081208-5e3ef4b5456d // indirect
 	github.com/spiffe/go-spiffe/v2 v2.5.0 // indirect
 	github.com/temoto/robotstxt v1.1.2 // indirect
+	github.com/ysmood/fetchup v0.2.3 // indirect
+	github.com/ysmood/goob v0.4.0 // indirect
+	github.com/ysmood/got v0.40.0 // indirect
+	github.com/ysmood/gson v0.7.3 // indirect
+	github.com/ysmood/leakless v0.9.0 // indirect
 	github.com/zeebo/errs v1.4.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/contrib/detectors/gcp v1.35.0 // indirect
@@ -71,12 +77,12 @@ require (
 	go.opentelemetry.io/otel/sdk v1.35.0 // indirect
 	go.opentelemetry.io/otel/sdk/metric v1.35.0 // indirect
 	go.opentelemetry.io/otel/trace v1.35.0 // indirect
-	golang.org/x/net v0.49.0 // indirect
+	golang.org/x/net v0.51.0 // indirect
 	golang.org/x/oauth2 v0.30.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
 	golang.org/x/sys v0.41.0 // indirect
 	golang.org/x/text v0.34.0 // indirect
-	golang.org/x/time v0.11.0 // indirect
+	golang.org/x/time v0.14.0 // indirect
 	google.golang.org/api v0.231.0 // indirect
 	google.golang.org/appengine v1.6.8 // indirect
 	google.golang.org/appengine/v2 v2.0.6 // indirect

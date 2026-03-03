@@ -312,7 +312,7 @@ export default function DashboardPage() {
                 <button
                   className="flex items-center gap-2 bg-crimson text-white px-5 py-2 rounded-lg font-semibold text-sm
                              hover:bg-rose-pink transition-all duration-200 cursor-pointer shadow-sm"
-                  onClick={() => toast.info("Bot builder coming soon!")}
+                  onClick={() => navigate(`/console/integrate/${project.id}`)}
                 >
                   Open Builder
                 </button>
