@@ -48,6 +48,15 @@ func NewRouter(db *database.DB) http.Handler {
 	mux.Handle("POST /api/v1/account/confirm-email", authMw(http.HandlerFunc(googleHandler.ConfirmChangeEmail)))
 	mux.Handle("DELETE /api/v1/account", authMw(http.HandlerFunc(googleHandler.DeleteAccount)))
 
+	// Bot Builder / Console (protected)
+	botBuilder := handler.NewBotBuilderHandler(db)
+	mux.Handle("GET /api/v1/console/status/{project_id}", authMw(http.HandlerFunc(botBuilder.GetSetupStatus)))
+	mux.Handle("POST /api/v1/console/crawl/{project_id}", authMw(http.HandlerFunc(botBuilder.CrawlWebsite)))
+	mux.Handle("POST /api/v1/console/chunk/{project_id}", authMw(http.HandlerFunc(botBuilder.ChunkDocuments)))
+	mux.Handle("POST /api/v1/console/upload/{project_id}", authMw(http.HandlerFunc(botBuilder.UploadFile)))
+	mux.Handle("POST /api/v1/console/api-key/{project_id}", authMw(http.HandlerFunc(botBuilder.SaveAPIKey)))
+	mux.Handle("POST /api/v1/console/embed/{project_id}", authMw(http.HandlerFunc(botBuilder.EmbedChunks)))
+
 	// Apply middleware stack
 	var h http.Handler = mux
 	h = middleware.Logger(h)
