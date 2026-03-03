@@ -83,6 +83,55 @@ var migrations = []struct {
 			CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id) WHERE google_id IS NOT NULL;
 		`,
 	},
+	{
+		Name: "006_enable_pgvector",
+		SQL: `
+			CREATE EXTENSION IF NOT EXISTS vector;
+		`,
+	},
+	{
+		Name: "007_add_project_bot_fields",
+		SQL: `
+			ALTER TABLE projects ADD COLUMN IF NOT EXISTS website_url TEXT DEFAULT '';
+			ALTER TABLE projects ADD COLUMN IF NOT EXISTS gemini_api_key_encrypted TEXT DEFAULT '';
+			ALTER TABLE projects ADD COLUMN IF NOT EXISTS bot_name VARCHAR(255) DEFAULT '';
+			ALTER TABLE projects ADD COLUMN IF NOT EXISTS system_prompt TEXT DEFAULT '';
+			ALTER TABLE projects ADD COLUMN IF NOT EXISTS setup_step INT NOT NULL DEFAULT 0;
+		`,
+	},
+	{
+		Name: "008_create_documents",
+		SQL: `
+			CREATE TABLE IF NOT EXISTS documents (
+				id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+				project_id    UUID         NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+				source_url    TEXT         NOT NULL DEFAULT '',
+				source_type   VARCHAR(20)  NOT NULL DEFAULT 'web',
+				title         TEXT         DEFAULT '',
+				raw_content   TEXT         DEFAULT '',
+				content_hash  VARCHAR(64)  DEFAULT '',
+				status        VARCHAR(20)  NOT NULL DEFAULT 'pending',
+				created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+			);
+			CREATE INDEX IF NOT EXISTS idx_documents_project_id ON documents(project_id);
+		`,
+	},
+	{
+		Name: "009_create_chunks",
+		SQL: `
+			CREATE TABLE IF NOT EXISTS chunks (
+				id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+				document_id   UUID         NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+				project_id    UUID         NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+				chunk_index   INT          NOT NULL DEFAULT 0,
+				content       TEXT         NOT NULL,
+				embedding     vector(768),
+				created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+			);
+			CREATE INDEX IF NOT EXISTS idx_chunks_document_id ON chunks(document_id);
+			CREATE INDEX IF NOT EXISTS idx_chunks_project_id ON chunks(project_id);
+		`,
+	},
 }
 
 // RunMigrations applies all pending migrations.
