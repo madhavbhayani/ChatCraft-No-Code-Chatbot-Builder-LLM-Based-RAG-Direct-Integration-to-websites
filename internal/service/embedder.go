@@ -8,7 +8,7 @@ import (
 )
 
 // EmbedText sends text to the Gemini Embedding API and returns a 768-dimensional vector.
-// Uses the gemini-embedding-001 model (formerly text-embedding-004).
+// Uses the gemini-embedding-001 model with OutputDimensionality=768 to match DB column.
 func EmbedText(ctx context.Context, apiKey string, text string) ([]float32, error) {
 	client, err := genai.NewClient(ctx, &genai.ClientConfig{
 		APIKey:  apiKey,
@@ -18,7 +18,10 @@ func EmbedText(ctx context.Context, apiKey string, text string) ([]float32, erro
 		return nil, fmt.Errorf("failed to create Gemini client: %w", err)
 	}
 
-	result, err := client.Models.EmbedContent(ctx, "gemini-embedding-001", []*genai.Content{genai.NewContentFromText(text, genai.RoleUser)}, nil)
+	result, err := client.Models.EmbedContent(ctx, "gemini-embedding-001",
+		[]*genai.Content{genai.NewContentFromText(text, genai.RoleUser)},
+		&genai.EmbedContentConfig{OutputDimensionality: genai.Ptr(int32(768))},
+	)
 	if err != nil {
 		return nil, fmt.Errorf("embedding API call failed: %w", err)
 	}
@@ -44,7 +47,10 @@ func EmbedBatch(ctx context.Context, apiKey string, texts []string) ([][]float32
 	embeddings := make([][]float32, 0, len(texts))
 
 	for _, text := range texts {
-		result, err := client.Models.EmbedContent(ctx, "gemini-embedding-001", []*genai.Content{genai.NewContentFromText(text, genai.RoleUser)}, nil)
+		result, err := client.Models.EmbedContent(ctx, "gemini-embedding-001",
+			[]*genai.Content{genai.NewContentFromText(text, genai.RoleUser)},
+			&genai.EmbedContentConfig{OutputDimensionality: genai.Ptr(int32(768))},
+		)
 		if err != nil {
 			return nil, fmt.Errorf("embedding failed for text: %w", err)
 		}

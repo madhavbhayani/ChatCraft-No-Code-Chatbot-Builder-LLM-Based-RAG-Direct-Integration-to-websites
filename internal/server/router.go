@@ -58,6 +58,12 @@ func NewRouter(db *database.DB) http.Handler {
 	mux.Handle("POST /api/v1/console/api-key/{project_id}", authMw(http.HandlerFunc(botBuilder.SaveAPIKey)))
 	mux.Handle("POST /api/v1/console/embed/{project_id}", authMw(http.HandlerFunc(botBuilder.EmbedChunks)))
 	mux.Handle("GET /api/v1/console/embed-status/{job_id}", authMw(http.HandlerFunc(botBuilder.GetEmbedJobStatus)))
+	mux.Handle("GET /api/v1/console/documents/{project_id}", authMw(http.HandlerFunc(botBuilder.GetDocuments)))
+	mux.Handle("GET /api/v1/console/chunks/{project_id}", authMw(http.HandlerFunc(botBuilder.GetChunks)))
+	mux.Handle("POST /api/v1/console/test-chat/{project_id}", authMw(http.HandlerFunc(botBuilder.TestChat)))
+	mux.Handle("PUT /api/v1/console/settings/{project_id}", authMw(http.HandlerFunc(botBuilder.UpdateProjectSettings)))
+	mux.Handle("PUT /api/v1/console/model/{project_id}", authMw(http.HandlerFunc(botBuilder.SaveModelSelection)))
+	mux.Handle("DELETE /api/v1/console/data/{project_id}", authMw(http.HandlerFunc(botBuilder.DeleteProjectData)))
 
 	// Chat endpoint (public — no auth, called from embedded widgets)
 	chatHandler := handler.NewChatHandler(db)

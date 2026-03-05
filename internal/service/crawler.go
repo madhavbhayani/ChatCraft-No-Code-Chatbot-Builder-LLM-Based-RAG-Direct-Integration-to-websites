@@ -18,9 +18,6 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/go-rod/rod"
-	"github.com/go-rod/rod/lib/launcher"
-	"github.com/go-rod/rod/lib/proto"
 	"github.com/gocolly/colly/v2"
 	"github.com/temoto/robotstxt"
 )
@@ -596,89 +593,6 @@ func detectContentType(pageURL string, doc *goquery.Selection, faqs []QAPair) st
 	return "general"
 }
 
-// ---------- Headless Browser Rendering (Rod) ----------
-
-// rodRenderPage renders a single page using headless Chrome and extracts content.
-func rodRenderPage(browser *rod.Browser, pageURL string) (*PageContent, error) {
-	page, err := browser.Page(proto.TargetCreateTarget{URL: pageURL})
-	if err != nil {
-		return nil, fmt.Errorf("create tab: %w", err)
-	}
-	defer page.Close()
-
-	tp := page.Timeout(20 * time.Second)
-
-	// Wait for JS framework to finish rendering
-	if err := tp.WaitDOMStable(time.Second, 0.1); err != nil {
-		return nil, fmt.Errorf("wait render: %w", err)
-	}
-
-	html, err := tp.HTML()
-	if err != nil {
-		return nil, fmt.Errorf("get HTML: %w", err)
-	}
-
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
-	if err != nil {
-		return nil, fmt.Errorf("parse HTML: %w", err)
-	}
-
-	return extractPageContentFromDoc(doc.Selection, pageURL), nil
-}
-
-// rodCrawlPages uses headless Chrome to render and extract content from
-// JavaScript-heavy / SPA pages. Called as a fallback when Colly finds no content.
-func rodCrawlPages(urls []string, robots *robotstxt.RobotsData) ([]PageContent, int, int) {
-	l := launcher.New().Headless(true).Leakless(false)
-	controlURL, err := l.Launch()
-	if err != nil {
-		log.Printf("[crawler] Cannot launch headless browser: %v", err)
-		return nil, 0, 0
-	}
-
-	browser := rod.New().ControlURL(controlURL).MustConnect()
-	defer browser.MustClose()
-
-	maxPages := getMaxPages()
-	log.Printf("[crawler] Headless browser launched — rendering %d URLs...", len(urls))
-
-	var pages []PageContent
-	var thinCount, errCount int
-
-	for i, u := range urls {
-		if len(pages) >= maxPages {
-			break
-		}
-		if shouldSkipURL(u) {
-			continue
-		}
-		if !isAllowedByRobots(robots, u) {
-			continue
-		}
-
-		content, err := rodRenderPage(browser, u)
-		if err != nil {
-			errCount++
-			log.Printf("[crawler] Rod error on %s: %v", u, err)
-			continue
-		}
-
-		if content.WordCount < minWordCount {
-			thinCount++
-			log.Printf("[crawler] Rod thin (%d words): %s", content.WordCount, u)
-			continue
-		}
-
-		pages = append(pages, *content)
-		log.Printf("[crawler] Rod ✓ %d words from %s (%d/%d)", content.WordCount, u, len(pages), i+1)
-
-		// Polite delay between pages
-		time.Sleep(300 * time.Millisecond)
-	}
-
-	return pages, thinCount, errCount
-}
-
 // ---------- Phase 1 Content Filter (Free, No API Calls) ----------
 
 // passesPhaseOneFilter returns false if the page should be skipped.
@@ -791,12 +705,17 @@ func scoreURL(rawURL string) int {
 	return score
 }
 
+// CrawlProgressFn is a callback for reporting real-time crawl progress.
+// Called from within SmartCrawl every time a page is extracted or skipped.
+type CrawlProgressFn func(pagesFound, thinSkipped, errors int, currentURL string)
+
 // ---------- Main Crawl Function ----------
 
 // SmartCrawl performs intelligent website crawling with robots.txt respect,
 // sitemap discovery, rate limiting, UA rotation, smart content extraction,
 // and FAQ detection. Returns structured pages and a quality report.
-func SmartCrawl(baseURL string) (*CrawlResult, error) {
+// The optional progressFn is called on each page (pass nil to disable).
+func SmartCrawl(baseURL string, progressFn CrawlProgressFn) (*CrawlResult, error) {
 	startTime := time.Now()
 
 	parsed, err := url.Parse(baseURL)
@@ -894,8 +813,13 @@ func SmartCrawl(baseURL string) (*CrawlResult, error) {
 		if !passesPhaseOneFilter(e.DOM, page.WordCount) {
 			mu.Lock()
 			report.ThinContentSkipped++
+			thinNow := report.ThinContentSkipped
+			errNow := report.ErrorCount
 			mu.Unlock()
 			log.Printf("[crawler] Phase 1 filter rejected (%d words): %s", page.WordCount, e.Request.URL)
+			if progressFn != nil {
+				progressFn(int(count.Load()), thinNow, errNow, e.Request.URL.String())
+			}
 			return
 		}
 
@@ -903,10 +827,16 @@ func SmartCrawl(baseURL string) (*CrawlResult, error) {
 		pages = append(pages, *page)
 		report.FAQsDetected += len(page.FAQs)
 		report.TotalWords += page.WordCount
+		pagesNow := len(pages)
+		thinNow := report.ThinContentSkipped
+		errNow := report.ErrorCount
 		mu.Unlock()
 
 		count.Add(1)
 		log.Printf("[crawler] ✓ Extracted %d words from: %s", page.WordCount, e.Request.URL)
+		if progressFn != nil {
+			progressFn(pagesNow, thinNow, errNow, e.Request.URL.String())
+		}
 	})
 
 	// BFS link following
@@ -936,8 +866,14 @@ func SmartCrawl(baseURL string) (*CrawlResult, error) {
 	c.OnError(func(r *colly.Response, err error) {
 		mu.Lock()
 		report.ErrorCount++
+		pagesNow := len(pages)
+		thinNow := report.ThinContentSkipped
+		errNow := report.ErrorCount
 		mu.Unlock()
 		log.Printf("[crawler] Error %d on %s: %v", r.StatusCode, r.Request.URL, err)
+		if progressFn != nil {
+			progressFn(pagesNow, thinNow, errNow, r.Request.URL.String())
+		}
 	})
 
 	c.OnResponse(func(r *colly.Response) {
@@ -989,31 +925,10 @@ func SmartCrawl(baseURL string) (*CrawlResult, error) {
 		len(pages), report.ThinContentSkipped, report.RobotsTxtBlocked, report.ErrorCount, report.DuplicatesSkipped)
 
 	// If Colly found no usable pages but lots of thin content,
-	// the site is likely JavaScript-rendered (SPA). Fall back to headless browser.
+	// the site likely uses JavaScript rendering (SPA). Log a message.
 	if len(pages) == 0 && report.ThinContentSkipped > 0 {
-		log.Printf("[crawler] No content from static HTML (thin=%d) — trying headless browser...",
+		log.Printf("[crawler] WARNING: No content from static HTML (thin=%d). Site may use JavaScript rendering — content not rendered (headless browser disabled).",
 			report.ThinContentSkipped)
-
-		// Gather URLs: base + sitemap
-		rodURLs := []string{baseURL}
-		for _, u := range sitemapURLs {
-			rodURLs = append(rodURLs, u)
-		}
-
-		rodPages, rodThin, rodErrors := rodCrawlPages(rodURLs, robots)
-		if len(rodPages) > 0 {
-			pages = rodPages
-			report.ThinContentSkipped = rodThin
-			report.ErrorCount = rodErrors
-			report.JSRendered = true
-			report.TotalWords = 0
-			report.FAQsDetected = 0
-			for _, p := range pages {
-				report.TotalWords += p.WordCount
-				report.FAQsDetected += len(p.FAQs)
-			}
-			log.Printf("[crawler] Rod recovered %d pages, %d words", len(pages), report.TotalWords)
-		}
 	}
 
 	if len(pages) == 0 {

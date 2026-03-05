@@ -191,6 +191,16 @@ var migrations = []struct {
 			CREATE INDEX IF NOT EXISTS idx_conversations_session_id ON conversations(session_id);
 		`,
 	},
+	{
+		Name: "014_add_llm_model_fields",
+		SQL: `
+			ALTER TABLE projects ADD COLUMN IF NOT EXISTS llm_model VARCHAR(100) DEFAULT 'gemini-2.5-flash';
+			ALTER TABLE projects ADD COLUMN IF NOT EXISTS llm_rpm INT DEFAULT 5;
+			ALTER TABLE projects ADD COLUMN IF NOT EXISTS llm_tpm INT DEFAULT 250000;
+			ALTER TABLE projects ADD COLUMN IF NOT EXISTS llm_rpd INT DEFAULT 20;
+			ALTER TABLE projects ADD COLUMN IF NOT EXISTS max_input_tokens INT DEFAULT 50000;
+		`,
+	},
 }
 
 // RunMigrations applies all pending migrations.

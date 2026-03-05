@@ -68,12 +68,14 @@ func (h *ChatHandler) Chat(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	// Step 1: Resolve project from bot_token (bot_token = project_id for now)
-	var projectID, encryptedKey, systemPrompt, botName string
+	var projectID, encryptedKey, systemPrompt, botName, llmModel string
+	var maxInputTokens int
 	err := h.DB.Pool.QueryRow(ctx,
-		`SELECT id, COALESCE(gemini_api_key_encrypted, ''), COALESCE(system_prompt, ''), COALESCE(bot_name, '')
+		`SELECT id, COALESCE(gemini_api_key_encrypted, ''), COALESCE(system_prompt, ''), COALESCE(bot_name, ''),
+		        COALESCE(llm_model, 'gemini-2.5-flash'), COALESCE(max_input_tokens, 50000)
 		 FROM projects
 		 WHERE id = $1 AND status = 'active'`, botToken,
-	).Scan(&projectID, &encryptedKey, &systemPrompt, &botName)
+	).Scan(&projectID, &encryptedKey, &systemPrompt, &botName, &llmModel, &maxInputTokens)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "Bot not found or inactive")
 		return
@@ -144,9 +146,29 @@ func (h *ChatHandler) Chat(w http.ResponseWriter, r *http.Request) {
 		Confidence: topScore,
 	}
 
+	// Determine assistant name for prompts
+	assistantName := "this website"
+	if botName != "" {
+		assistantName = botName
+	}
+
 	if len(results) == 0 || topScore < 0.65 {
-		// No relevant results — return fallback
-		response.Answer = "I don't have information about that. Please contact support for further assistance."
+		// No relevant results — use LLM to generate a helpful fallback
+		fallbackPrompt := fmt.Sprintf(
+			`You are a helpful assistant for %s.
+The user asked a question but no relevant information was found in your knowledge base.
+Politely let them know you don't have specific information about their query in the knowledge base.
+Still try to be helpful — suggest they rephrase or provide more context.
+Be concise, friendly, and professional. Keep response under 80 words.`,
+			assistantName,
+		)
+		fallbackAnswer, err := callGemini(ctx, apiKey, llmModel, fallbackPrompt, req.Message)
+		if err != nil {
+			log.Printf("[chat] fallback LLM error: %v", err)
+			response.Answer = "I don't have specific information about that in my knowledge base. Could you try rephrasing your question, or reach out to support for more help?"
+		} else {
+			response.Answer = fallbackAnswer
+		}
 		response.Fallback = true
 		response.Sources = []string{}
 
@@ -177,10 +199,10 @@ func (h *ChatHandler) Chat(w http.ResponseWriter, r *http.Request) {
 	}
 	contextText := strings.Join(contextParts, "\n---\n")
 
-	// Build system prompt
-	assistantName := "this website"
-	if botName != "" {
-		assistantName = botName
+	// Truncate context to fit within maxInputTokens (rough estimate: 1 token ≈ 4 chars)
+	maxContextChars := maxInputTokens * 4
+	if len(contextText) > maxContextChars {
+		contextText = contextText[:maxContextChars]
 	}
 
 	sysPrompt := systemPrompt
@@ -198,7 +220,7 @@ Keep your answer under 150 words unless the question requires more detail.`,
 	fullSystemPrompt := sysPrompt + "\n\nContext:\n" + contextText
 
 	// Call Gemini generative model
-	answer, err := callGemini(ctx, apiKey, fullSystemPrompt, req.Message)
+	answer, err := callGemini(ctx, apiKey, llmModel, fullSystemPrompt, req.Message)
 	if err != nil {
 		log.Printf("[chat] Gemini LLM error: %v", err)
 		response.Answer = "I'm having trouble generating a response right now. Please try again."
@@ -219,7 +241,7 @@ Keep your answer under 150 words unless the question requires more detail.`,
 }
 
 // callGemini calls the Gemini generative model for RAG response.
-func callGemini(ctx context.Context, apiKey, systemPrompt, userMessage string) (string, error) {
+func callGemini(ctx context.Context, apiKey, modelName, systemPrompt, userMessage string) (string, error) {
 	client, err := genai.NewClient(ctx, &genai.ClientConfig{
 		APIKey:  apiKey,
 		Backend: genai.BackendGeminiAPI,
@@ -228,11 +250,11 @@ func callGemini(ctx context.Context, apiKey, systemPrompt, userMessage string) (
 		return "", fmt.Errorf("create client: %w", err)
 	}
 
-	result, err := client.Models.GenerateContent(ctx, "gemini-2.0-flash", []*genai.Content{
+	result, err := client.Models.GenerateContent(ctx, modelName, []*genai.Content{
 		genai.NewContentFromText(userMessage, genai.RoleUser),
 	}, &genai.GenerateContentConfig{
 		SystemInstruction: genai.NewContentFromText(systemPrompt, genai.RoleUser),
-		MaxOutputTokens:   512,
+		MaxOutputTokens:   2048,
 		Temperature:       genai.Ptr[float32](0.3),
 	})
 	if err != nil {

@@ -196,8 +196,8 @@ export default function IntegratePage() {
         if (data.status === "done") {
           stopCrawlPolling();
           setCrawling(false);
-          setCompletedSteps((prev) => new Set([...prev, 1, 2]));
-          toast.success(`Crawl complete: ${data.crawled_urls} pages, ${data.chunks_created} chunks created`);
+          setCompletedSteps((prev) => new Set([...prev, 2]));
+          toast.success(`Crawl complete: ${data.crawled_urls} pages extracted`);
           fetchStatus();
         } else if (data.status === "failed") {
           stopCrawlPolling();
@@ -270,7 +270,7 @@ export default function IntegratePage() {
           }))
         );
         if (data.report) setCrawlReport(data.report);
-        setCompletedSteps((prev) => new Set([...prev, 1]));
+        setCompletedSteps((prev) => new Set([...prev, 2]));
         toast.success(data.message);
         setCrawling(false);
       }
@@ -292,7 +292,7 @@ export default function IntegratePage() {
       if (!res.ok) throw new Error(data.error || "Chunking failed");
 
       setChunkStats(data);
-      setCompletedSteps((prev) => new Set([...prev, 2]));
+      setCompletedSteps((prev) => new Set([...prev, 3]));
       toast.success(data.message);
     } catch (err) {
       toast.error(err.message);
@@ -363,7 +363,7 @@ export default function IntegratePage() {
       if (!res.ok) throw new Error(data.error || "Failed to validate API key");
 
       setKeyValidated(true);
-      setCompletedSteps((prev) => new Set([...prev, 3]));
+      setCompletedSteps((prev) => new Set([...prev, 1]));
       toast.success("API key validated and saved!");
     } catch (err) {
       toast.error(err.message);
@@ -702,7 +702,7 @@ export default function IntegratePage() {
                           {crawlProgress.current_phase === "crawling" && "Crawling website pages..."}
                           {crawlProgress.current_phase === "comparing" && "Comparing with existing data..."}
                           {crawlProgress.current_phase === "processing" && "Processing & storing pages..."}
-                          {crawlProgress.current_phase === "chunking" && "Auto-chunking documents..."}
+                          {crawlProgress.current_phase === "failed" && "Crawl failed"}
                           {(!crawlProgress.current_phase || crawlProgress.current_phase === "") && "Starting crawl..."}
                         </p>
                         <p className="text-xs text-muted">Job ID: {crawlProgress.id?.slice(0, 8)}...</p>
@@ -764,7 +764,7 @@ export default function IntegratePage() {
                   <div className="mt-4 p-5 rounded-xl border border-success/30 bg-success/5 space-y-3">
                     <div className="flex items-center gap-2">
                       <CheckCircle2 size={20} className="text-success" />
-                      <h4 className="text-sm font-bold text-charcoal">Crawl & Chunking Complete!</h4>
+                      <h4 className="text-sm font-bold text-charcoal">Crawl Complete!</h4>
                     </div>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                       <MiniStat label="Pages Stored" value={crawlProgress.crawled_urls} color="text-success" />

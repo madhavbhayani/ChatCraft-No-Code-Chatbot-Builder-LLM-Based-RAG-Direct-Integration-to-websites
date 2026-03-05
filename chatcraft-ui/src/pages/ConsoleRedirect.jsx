@@ -24,7 +24,7 @@ export default function ConsoleRedirect() {
       .then((r) => r.json())
       .then((data) => {
         if (data.project) {
-          navigate(`/console/integrate/${data.project.id}`, { replace: true });
+          navigate(`/console/${data.project.id}`, { replace: true });
         } else {
           navigate("/dashboard", { replace: true });
         }

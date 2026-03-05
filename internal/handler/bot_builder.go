@@ -94,25 +94,31 @@ func (h *BotBuilderHandler) CrawlWebsite(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Update project website_url
+	log.Printf("[DB] UPDATE projects SET website_url = '%s' WHERE id = %s", req.URL, projectID)
 	_, err = h.DB.Pool.Exec(r.Context(),
 		"UPDATE projects SET website_url = $1, updated_at = NOW() WHERE id = $2",
 		req.URL, projectID,
 	)
 	if err != nil {
-		log.Printf("[crawl] update project URL error: %v", err)
+		log.Printf("[DB] ERROR update project URL: %v", err)
+	} else {
+		log.Printf("[DB] OK updated project website_url")
 	}
 
 	// Insert crawl job with status = 'queued'
 	jobID := uuid.New().String()
+	log.Printf("[DB] INSERT INTO crawl_jobs (id=%s, project_id=%s, status='queued')", jobID, projectID)
 	_, err = h.DB.Pool.Exec(r.Context(),
 		`INSERT INTO crawl_jobs (id, project_id, status, started_at)
 		 VALUES ($1, $2, 'queued', NOW())`,
 		jobID, projectID,
 	)
 	if err != nil {
+		log.Printf("[DB] ERROR insert crawl_jobs: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to create crawl job")
 		return
 	}
+	log.Printf("[DB] OK inserted crawl_jobs id=%s", jobID)
 
 	// Launch background goroutine
 	go h.runCrawlJob(jobID, projectID, req.URL)
@@ -174,6 +180,8 @@ func (h *BotBuilderHandler) writeCrawlProgress(jobID string, p *crawlProgress, f
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	log.Printf("[DB] UPDATE crawl_jobs SET current_phase='%s', crawled=%d, skipped=%d, total=%d, chunks=%d, logsLen=%d WHERE id=%s",
+		p.Phase, p.CrawledURLs, p.SkippedURLs, p.TotalURLs, p.ChunksCreated, len(p.Logs), jobID)
 	_, err = h.DB.Pool.Exec(ctx,
 		`UPDATE crawl_jobs SET
 			current_phase  = $1,
@@ -187,12 +195,10 @@ func (h *BotBuilderHandler) writeCrawlProgress(jobID string, p *crawlProgress, f
 		string(logsJSON), jobID,
 	)
 	if err != nil {
-		log.Printf("[crawl-progress] ERROR writing to DB for job %s: %v", jobID, err)
-		log.Printf("[crawl-progress]   phase=%s crawled=%d skipped=%d total=%d chunks=%d logsLen=%d",
-			p.Phase, p.CrawledURLs, p.SkippedURLs, p.TotalURLs, p.ChunksCreated, len(p.Logs))
+		log.Printf("[DB] ERROR writeCrawlProgress for job %s: %v", jobID, err)
+		log.Printf("[DB]   logsJSON sample: %.200s", string(logsJSON))
 	} else {
-		log.Printf("[crawl-progress] OK job=%s phase=%s crawled=%d/%d chunks=%d logs=%d",
-			jobID[:8], p.Phase, p.CrawledURLs, p.TotalURLs, p.ChunksCreated, len(p.Logs))
+		log.Printf("[DB] OK writeCrawlProgress job=%s phase=%s", jobID[:8], p.Phase)
 	}
 	p.lastFlushAt = time.Now()
 }
@@ -206,11 +212,14 @@ func (h *BotBuilderHandler) runCrawlJob(jobID, projectID, crawlURL string) {
 	prog := newCrawlProgress()
 
 	// 1. Mark job as running (separate from log columns for reliability)
+	log.Printf("[DB] UPDATE crawl_jobs SET status='running' WHERE id = %s", jobID)
 	_, err := h.DB.Pool.Exec(ctx,
 		"UPDATE crawl_jobs SET status = 'running' WHERE id = $1", jobID,
 	)
 	if err != nil {
-		log.Printf("[crawl-job] ERROR marking job running: %v", err)
+		log.Printf("[DB] ERROR marking job running: %v", err)
+	} else {
+		log.Printf("[DB] OK crawl_jobs status='running'")
 	}
 
 	// 2. Write initial progress with phase + logs
@@ -219,16 +228,27 @@ func (h *BotBuilderHandler) runCrawlJob(jobID, projectID, crawlURL string) {
 	prog.addLog("Discovering sitemap and robots.txt...")
 	h.writeCrawlProgress(jobID, prog, true) // force=true
 
-	// --- CRAWL (this blocks for a while) ---
+	// --- CRAWL (this blocks for a while — but now reports per-page progress) ---
 	log.Printf("[crawl-job] SmartCrawl starting for %s", crawlURL)
-	result, err := service.SmartCrawl(crawlURL)
+	result, err := service.SmartCrawl(crawlURL, func(pagesFound, thinSkipped, errors int, currentURL string) {
+		// This callback is called from inside SmartCrawl for every page
+		prog.TotalURLs = pagesFound + thinSkipped + errors
+		prog.CrawledURLs = pagesFound
+		prog.SkippedURLs = thinSkipped
+		prog.addLog(fmt.Sprintf("Found page (%d total, %d skipped): %s", pagesFound, thinSkipped, currentURL))
+		h.writeCrawlProgress(jobID, prog, false) // throttled — writes max every 3s
+	})
 	if err != nil {
 		log.Printf("[crawl-job] SmartCrawl FAILED: %v", err)
+		prog.Phase = "failed"
+		prog.addLog(fmt.Sprintf("Crawl failed: %s", err.Error()))
+		h.writeCrawlProgress(jobID, prog, true) // force write final state
 		now := time.Now()
 		h.DB.Pool.Exec(ctx,
-			"UPDATE crawl_jobs SET status = 'failed', error_message = $1, finished_at = $2 WHERE id = $3",
+			"UPDATE crawl_jobs SET status = 'failed', error_message = $1, finished_at = $2, current_phase = 'failed' WHERE id = $3",
 			err.Error(), now, jobID,
 		)
+		log.Printf("[DB] UPDATE crawl_jobs SET status='failed' WHERE id = %s", jobID)
 		return
 	}
 	log.Printf("[crawl-job] SmartCrawl DONE: %d pages, %d thin skipped",
@@ -292,15 +312,17 @@ func (h *BotBuilderHandler) runCrawlJob(jobID, projectID, crawlURL string) {
 		}
 
 		docID := uuid.New().String()
+		log.Printf("[DB] INSERT INTO documents (id=%s, url=%s, words=%d)", docID[:8], page.URL, wordCount)
 		_, err := h.DB.Pool.Exec(ctx,
 			`INSERT INTO documents (id, project_id, source_url, source_type, title, raw_content, content_hash, status, created_at)
 			 VALUES ($1, $2, $3, 'web', $4, $5, $6, 'pending', NOW())`,
 			docID, projectID, page.URL, page.Title, rawContent, newHash,
 		)
 		if err != nil {
-			log.Printf("[crawl-job] insert doc error: %v", err)
+			log.Printf("[DB] ERROR insert doc: %v", err)
 			continue
 		}
+		log.Printf("[DB] OK inserted document id=%s", docID[:8])
 		crawledCount++
 		prog.CrawledURLs = crawledCount
 		prog.SkippedURLs = skippedCount
@@ -318,72 +340,38 @@ func (h *BotBuilderHandler) runCrawlJob(jobID, projectID, crawlURL string) {
 		}
 	}
 
-	// --- AUTO-CHUNK ---
-	prog.Phase = "chunking"
-	prog.addLog("Auto-chunking documents into ~400-word segments...")
-	h.writeCrawlProgress(jobID, prog, true) // force
-
-	chunkRows, err := h.DB.Pool.Query(ctx,
-		"SELECT id, title, raw_content FROM documents WHERE project_id = $1 AND status = 'pending'",
+	// Update setup_step to 2 (crawl done — user must chunk manually in Step 3)
+	_, err = h.DB.Pool.Exec(ctx,
+		"UPDATE projects SET setup_step = GREATEST(setup_step, 2), updated_at = NOW() WHERE id = $1",
 		projectID,
 	)
-	totalChunks := 0
-	if err == nil {
-		defer chunkRows.Close()
-		for chunkRows.Next() {
-			var docID, title, content string
-			if chunkRows.Scan(&docID, &title, &content) != nil {
-				continue
-			}
-
-			h.DB.Pool.Exec(ctx, "DELETE FROM chunks WHERE document_id = $1", docID)
-
-			chunks := service.SmartChunkText(title, content, 400, 50)
-			for _, chunk := range chunks {
-				chunkID := uuid.New().String()
-				_, err := h.DB.Pool.Exec(ctx,
-					`INSERT INTO chunks (id, document_id, project_id, chunk_index, content, created_at)
-					 VALUES ($1, $2, $3, $4, $5, NOW())`,
-					chunkID, docID, projectID, chunk.Index, chunk.Content,
-				)
-				if err != nil {
-					log.Printf("[crawl-job] chunk insert error: %v", err)
-					continue
-				}
-				totalChunks++
-			}
-
-			h.DB.Pool.Exec(ctx, "UPDATE documents SET status = 'chunked' WHERE id = $1", docID)
-		}
+	if err != nil {
+		log.Printf("[crawl-job] ERROR updating setup_step: %v", err)
+	} else {
+		log.Printf("[DB] UPDATE projects SET setup_step = GREATEST(setup_step, 2) WHERE id = %s", projectID)
 	}
-
-	prog.ChunksCreated = totalChunks
-	prog.addLog(fmt.Sprintf("Chunking complete: %d chunks created", totalChunks))
-
-	h.DB.Pool.Exec(ctx,
-		"UPDATE projects SET setup_step = GREATEST(setup_step, 3), updated_at = NOW() WHERE id = $1",
-		projectID,
-	)
 
 	// --- FINAL ---
 	prog.Phase = "done"
-	prog.addLog(fmt.Sprintf("All done! %d new/updated, %d unchanged, %d chunks created",
-		crawledCount, skippedCount, totalChunks))
+	prog.addLog(fmt.Sprintf("All done! %d new/updated, %d unchanged. Ready for chunking.",
+		crawledCount, skippedCount))
 	h.writeCrawlProgress(jobID, prog, true) // force final write
 
 	now := time.Now()
 	_, err = h.DB.Pool.Exec(ctx,
 		`UPDATE crawl_jobs SET status = 'done', crawled_urls = $1, skipped_urls = $2,
-		 total_urls = $3, chunks_created = $4, finished_at = $5, current_phase = 'done'
-		 WHERE id = $6`,
-		crawledCount, skippedCount, totalDiscovered, totalChunks, now, jobID,
+		 total_urls = $3, chunks_created = 0, finished_at = $4, current_phase = 'done'
+		 WHERE id = $5`,
+		crawledCount, skippedCount, totalDiscovered, now, jobID,
 	)
 	if err != nil {
 		log.Printf("[crawl-job] ERROR marking job done: %v", err)
+	} else {
+		log.Printf("[DB] UPDATE crawl_jobs SET status='done' WHERE id = %s", jobID)
 	}
 
-	log.Printf("[crawl-job] %s COMPLETE: %d crawled, %d skipped, %d chunks",
-		jobID, crawledCount, skippedCount, totalChunks)
+	log.Printf("[crawl-job] %s COMPLETE: %d crawled, %d skipped",
+		jobID, crawledCount, skippedCount)
 }
 
 // GetCrawlJobStatus returns the current status of a crawl job.
@@ -400,6 +388,7 @@ func (h *BotBuilderHandler) GetCrawlJobStatus(w http.ResponseWriter, r *http.Req
 	var finishedAt *time.Time
 	var recentLogs []byte
 
+	log.Printf("[DB] SELECT FROM crawl_jobs WHERE id = %s", jobID)
 	err := h.DB.Pool.QueryRow(r.Context(),
 		`SELECT status, total_urls, crawled_urls, skipped_urls, chunks_created,
 		        COALESCE(error_message, ''), COALESCE(current_phase, ''), started_at, finished_at,
@@ -408,10 +397,11 @@ func (h *BotBuilderHandler) GetCrawlJobStatus(w http.ResponseWriter, r *http.Req
 	).Scan(&status, &totalURLs, &crawledURLs, &skippedURLs, &chunksCreated,
 		&errorMessage, &currentPhase, &startedAt, &finishedAt, &recentLogs)
 	if err != nil {
-		log.Printf("[crawl-status] ERROR querying job %s: %v", jobID, err)
+		log.Printf("[DB] ERROR querying crawl_jobs id=%s: %v", jobID, err)
 		writeError(w, http.StatusNotFound, "Crawl job not found")
 		return
 	}
+	log.Printf("[DB] OK crawl_jobs id=%s status=%s phase=%s crawled=%d", jobID[:8], status, currentPhase, crawledURLs)
 
 	// Parse recent_logs as JSON array, default to empty array on error
 	var parsedLogs json.RawMessage
@@ -482,6 +472,7 @@ func (h *BotBuilderHandler) ChunkDocuments(w http.ResponseWriter, r *http.Reques
 		}
 
 		// Delete existing chunks for this document (re-chunk scenario)
+		log.Printf("[DB] DELETE FROM chunks WHERE document_id = %s", docID[:8])
 		_, _ = h.DB.Pool.Exec(r.Context(),
 			"DELETE FROM chunks WHERE document_id = $1", docID,
 		)
@@ -491,6 +482,7 @@ func (h *BotBuilderHandler) ChunkDocuments(w http.ResponseWriter, r *http.Reques
 
 		for _, chunk := range chunks {
 			chunkID := uuid.New().String()
+			log.Printf("[DB] INSERT INTO chunks (id=%s, doc=%s, idx=%d)", chunkID[:8], docID[:8], chunk.Index)
 			_, err := h.DB.Pool.Exec(r.Context(),
 				`INSERT INTO chunks (id, document_id, project_id, chunk_index, content, created_at)
 				 VALUES ($1, $2, $3, $4, $5, NOW())`,
@@ -504,15 +496,18 @@ func (h *BotBuilderHandler) ChunkDocuments(w http.ResponseWriter, r *http.Reques
 		}
 
 		// Mark document as chunked
+		log.Printf("[DB] UPDATE documents SET status='chunked' WHERE id = %s", docID[:8])
 		_, _ = h.DB.Pool.Exec(r.Context(),
 			"UPDATE documents SET status = 'chunked' WHERE id = $1", docID,
 		)
 	}
 
 	// Update setup_step to at least 3
+	log.Printf("[DB] UPDATE projects SET setup_step = GREATEST(setup_step, 3) WHERE id = %s", projectID)
 	_, _ = h.DB.Pool.Exec(r.Context(),
 		"UPDATE projects SET setup_step = GREATEST(setup_step, 3), updated_at = NOW() WHERE id = $1", projectID,
 	)
+	log.Printf("[DB] OK ChunkDocuments complete: %d chunks created", totalChunks)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -657,14 +652,17 @@ func (h *BotBuilderHandler) SaveAPIKey(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Store encrypted key
+	log.Printf("[DB] UPDATE projects SET gemini_api_key_encrypted, setup_step=GREATEST(setup_step,1) WHERE id = %s", projectID)
 	_, err = h.DB.Pool.Exec(r.Context(),
 		"UPDATE projects SET gemini_api_key_encrypted = $1, setup_step = GREATEST(setup_step, 1), updated_at = NOW() WHERE id = $2",
 		encrypted, projectID,
 	)
 	if err != nil {
+		log.Printf("[DB] ERROR saving API key: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to save API key")
 		return
 	}
+	log.Printf("[DB] OK API key saved for project %s", projectID)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -769,6 +767,7 @@ func (h *BotBuilderHandler) runEmbedJob(jobID, projectID, apiKey string) {
 	ctx := context.Background()
 
 	// Mark job as running
+	log.Printf("[DB] UPDATE embed_jobs SET status='running' WHERE id = %s", jobID)
 	h.DB.Pool.Exec(ctx, "UPDATE embed_jobs SET status = 'running' WHERE id = $1", jobID)
 
 	// Fetch all chunks without embeddings
@@ -917,11 +916,15 @@ func (h *BotBuilderHandler) GetSetupStatus(w http.ResponseWriter, r *http.Reques
 	var ownerID, websiteURL string
 	var setupStep int
 	var hasAPIKey bool
+	var llmModel string
+	var llmRPM, llmTPM, llmRPD, maxInputTokens int
 	err := h.DB.Pool.QueryRow(r.Context(),
 		`SELECT user_id, COALESCE(website_url, ''), setup_step, 
-		        (gemini_api_key_encrypted IS NOT NULL AND gemini_api_key_encrypted != '')
+		        (gemini_api_key_encrypted IS NOT NULL AND gemini_api_key_encrypted != ''),
+		        COALESCE(llm_model, 'gemini-2.5-flash'), COALESCE(llm_rpm, 5), COALESCE(llm_tpm, 250000),
+		        COALESCE(llm_rpd, 20), COALESCE(max_input_tokens, 50000)
 		 FROM projects WHERE id = $1`, projectID,
-	).Scan(&ownerID, &websiteURL, &setupStep, &hasAPIKey)
+	).Scan(&ownerID, &websiteURL, &setupStep, &hasAPIKey, &llmModel, &llmRPM, &llmTPM, &llmRPD, &maxInputTokens)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "Project not found")
 		return
@@ -995,13 +998,18 @@ func (h *BotBuilderHandler) GetSetupStatus(w http.ResponseWriter, r *http.Reques
 
 	w.Header().Set("Content-Type", "application/json")
 	resp := map[string]interface{}{
-		"setup_step":     setupStep,
-		"website_url":    websiteURL,
-		"has_api_key":    hasAPIKey,
-		"document_count": docCount,
-		"chunk_count":    chunkCount,
-		"embedded_count": embeddedCount,
-		"documents":      documents,
+		"setup_step":       setupStep,
+		"website_url":      websiteURL,
+		"has_api_key":      hasAPIKey,
+		"document_count":   docCount,
+		"chunk_count":      chunkCount,
+		"embedded_count":   embeddedCount,
+		"documents":        documents,
+		"llm_model":        llmModel,
+		"llm_rpm":          llmRPM,
+		"llm_tpm":          llmTPM,
+		"llm_rpd":          llmRPD,
+		"max_input_tokens": maxInputTokens,
 	}
 	if activeCrawlJobID != nil {
 		resp["active_crawl_job_id"] = *activeCrawlJobID
@@ -1012,7 +1020,330 @@ func (h *BotBuilderHandler) GetSetupStatus(w http.ResponseWriter, r *http.Reques
 	json.NewEncoder(w).Encode(resp)
 }
 
+// ---------- Console: Knowledge Base Endpoints ----------
+
+// GetDocuments returns documents with raw_content for the knowledge base viewer.
+func (h *BotBuilderHandler) GetDocuments(w http.ResponseWriter, r *http.Request) {
+	userID := r.Header.Get("X-User-ID")
+	projectID := r.PathValue("project_id")
+	if projectID == "" {
+		writeError(w, http.StatusBadRequest, "Project ID is required")
+		return
+	}
+
+	var ownerID string
+	err := h.DB.Pool.QueryRow(r.Context(),
+		"SELECT user_id FROM projects WHERE id = $1", projectID,
+	).Scan(&ownerID)
+	if err != nil || ownerID != userID {
+		writeError(w, http.StatusForbidden, "Not your project")
+		return
+	}
+
+	rows, err := h.DB.Pool.Query(r.Context(),
+		`SELECT id, source_url, source_type, title, raw_content, content_hash, status, created_at
+		 FROM documents WHERE project_id = $1 ORDER BY created_at DESC`, projectID,
+	)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to fetch documents")
+		return
+	}
+	defer rows.Close()
+
+	var docs []map[string]interface{}
+	for rows.Next() {
+		var id, sourceURL, sourceType, title, rawContent, contentHash, status string
+		var createdAt time.Time
+		if err := rows.Scan(&id, &sourceURL, &sourceType, &title, &rawContent, &contentHash, &status, &createdAt); err != nil {
+			continue
+		}
+		wordCount := len(strings.Fields(rawContent))
+		docs = append(docs, map[string]interface{}{
+			"id":          id,
+			"source_url":  sourceURL,
+			"source_type": sourceType,
+			"title":       title,
+			"raw_content": rawContent,
+			"word_count":  wordCount,
+			"status":      status,
+			"created_at":  createdAt,
+		})
+	}
+
+	if docs == nil {
+		docs = []map[string]interface{}{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"documents": docs,
+		"count":     len(docs),
+	})
+}
+
+// GetChunks returns chunks for a specific document or all chunks for a project.
+func (h *BotBuilderHandler) GetChunks(w http.ResponseWriter, r *http.Request) {
+	userID := r.Header.Get("X-User-ID")
+	projectID := r.PathValue("project_id")
+	if projectID == "" {
+		writeError(w, http.StatusBadRequest, "Project ID is required")
+		return
+	}
+
+	var ownerID string
+	err := h.DB.Pool.QueryRow(r.Context(),
+		"SELECT user_id FROM projects WHERE id = $1", projectID,
+	).Scan(&ownerID)
+	if err != nil || ownerID != userID {
+		writeError(w, http.StatusForbidden, "Not your project")
+		return
+	}
+
+	documentID := r.URL.Query().Get("document_id")
+
+	var query string
+	var args []interface{}
+	if documentID != "" {
+		query = `SELECT c.id, c.document_id, c.chunk_index, c.content, 
+		                (c.embedding IS NOT NULL) as has_embedding, d.title as doc_title
+		         FROM chunks c JOIN documents d ON c.document_id = d.id
+		         WHERE c.project_id = $1 AND c.document_id = $2 ORDER BY c.chunk_index`
+		args = []interface{}{projectID, documentID}
+	} else {
+		query = `SELECT c.id, c.document_id, c.chunk_index, c.content,
+		                (c.embedding IS NOT NULL) as has_embedding, d.title as doc_title
+		         FROM chunks c JOIN documents d ON c.document_id = d.id
+		         WHERE c.project_id = $1 ORDER BY d.title, c.chunk_index`
+		args = []interface{}{projectID}
+	}
+
+	dbRows, err := h.DB.Pool.Query(r.Context(), query, args...)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to fetch chunks")
+		return
+	}
+	defer dbRows.Close()
+
+	var chunks []map[string]interface{}
+	for dbRows.Next() {
+		var id, docID, content, docTitle string
+		var chunkIndex int
+		var hasEmbedding bool
+		if err := dbRows.Scan(&id, &docID, &chunkIndex, &content, &hasEmbedding, &docTitle); err != nil {
+			continue
+		}
+		chunks = append(chunks, map[string]interface{}{
+			"id":            id,
+			"document_id":   docID,
+			"chunk_index":   chunkIndex,
+			"content":       content,
+			"has_embedding": hasEmbedding,
+			"doc_title":     docTitle,
+			"word_count":    len(strings.Fields(content)),
+		})
+	}
+
+	if chunks == nil {
+		chunks = []map[string]interface{}{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"chunks": chunks,
+		"count":  len(chunks),
+	})
+}
+
+// TestChat handles authenticated chat testing from the console.
+func (h *BotBuilderHandler) TestChat(w http.ResponseWriter, r *http.Request) {
+	userID := r.Header.Get("X-User-ID")
+	projectID := r.PathValue("project_id")
+	if projectID == "" {
+		writeError(w, http.StatusBadRequest, "Project ID is required")
+		return
+	}
+
+	var ownerID string
+	err := h.DB.Pool.QueryRow(r.Context(),
+		"SELECT user_id FROM projects WHERE id = $1", projectID,
+	).Scan(&ownerID)
+	if err != nil || ownerID != userID {
+		writeError(w, http.StatusForbidden, "Not your project")
+		return
+	}
+
+	// Reuse the public chat handler logic by forwarding to it
+	// but first set the bot_token path value
+	r.SetPathValue("bot_token", projectID)
+
+	chatHandler := &ChatHandler{DB: h.DB}
+	chatHandler.Chat(w, r)
+}
+
+// ---------- Console: Project Settings ----------
+
+// UpdateProjectSettings updates the project name.
+func (h *BotBuilderHandler) UpdateProjectSettings(w http.ResponseWriter, r *http.Request) {
+	userID := r.Header.Get("X-User-ID")
+	projectID := r.PathValue("project_id")
+	if projectID == "" {
+		writeError(w, http.StatusBadRequest, "Project ID is required")
+		return
+	}
+
+	var ownerID string
+	err := h.DB.Pool.QueryRow(r.Context(),
+		"SELECT user_id FROM projects WHERE id = $1", projectID,
+	).Scan(&ownerID)
+	if err != nil || ownerID != userID {
+		writeError(w, http.StatusForbidden, "Not your project")
+		return
+	}
+
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	req.Name = strings.TrimSpace(req.Name)
+	if req.Name == "" {
+		writeError(w, http.StatusBadRequest, "Project name is required")
+		return
+	}
+
+	log.Printf("[DB] UPDATE projects SET name='%s' WHERE id = %s", req.Name, projectID)
+	_, err = h.DB.Pool.Exec(r.Context(),
+		"UPDATE projects SET name = $1, updated_at = NOW() WHERE id = $2",
+		req.Name, projectID,
+	)
+	if err != nil {
+		log.Printf("[DB] ERROR updating project name: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to update project")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Project updated successfully",
+	})
+}
+
+// DeleteProjectData deletes all data (documents, chunks, jobs, conversations) for a project but keeps the project itself.
+func (h *BotBuilderHandler) DeleteProjectData(w http.ResponseWriter, r *http.Request) {
+	userID := r.Header.Get("X-User-ID")
+	projectID := r.PathValue("project_id")
+	if projectID == "" {
+		writeError(w, http.StatusBadRequest, "Project ID is required")
+		return
+	}
+
+	var ownerID string
+	err := h.DB.Pool.QueryRow(r.Context(),
+		"SELECT user_id FROM projects WHERE id = $1", projectID,
+	).Scan(&ownerID)
+	if err != nil || ownerID != userID {
+		writeError(w, http.StatusForbidden, "Not your project")
+		return
+	}
+
+	ctx := r.Context()
+
+	// Delete in order: chunks → documents → crawl_jobs → embed_jobs → conversations
+	log.Printf("[DB] Deleting all data for project %s", projectID)
+	h.DB.Pool.Exec(ctx, "DELETE FROM chunks WHERE project_id = $1", projectID)
+	h.DB.Pool.Exec(ctx, "DELETE FROM documents WHERE project_id = $1", projectID)
+	h.DB.Pool.Exec(ctx, "DELETE FROM crawl_jobs WHERE project_id = $1", projectID)
+	h.DB.Pool.Exec(ctx, "DELETE FROM embed_jobs WHERE project_id = $1", projectID)
+	h.DB.Pool.Exec(ctx, "DELETE FROM conversations WHERE project_id = $1", projectID)
+
+	// Reset project setup_step to 0
+	_, err = h.DB.Pool.Exec(ctx,
+		"UPDATE projects SET setup_step = 0, website_url = NULL, status = 'draft', updated_at = NOW() WHERE id = $1",
+		projectID,
+	)
+	if err != nil {
+		log.Printf("[DB] ERROR resetting project: %v", err)
+	}
+
+	log.Printf("[DB] OK deleted all data for project %s", projectID)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "All project data deleted successfully",
+	})
+}
+
 // ---------- Utility ----------
+
+// SaveModelSelection saves the user's chosen LLM model and its rate limits.
+func (h *BotBuilderHandler) SaveModelSelection(w http.ResponseWriter, r *http.Request) {
+	userID := r.Header.Get("X-User-ID")
+	projectID := r.PathValue("project_id")
+	if projectID == "" {
+		writeError(w, http.StatusBadRequest, "Project ID is required")
+		return
+	}
+
+	var ownerID string
+	err := h.DB.Pool.QueryRow(r.Context(),
+		"SELECT user_id FROM projects WHERE id = $1", projectID,
+	).Scan(&ownerID)
+	if err != nil || ownerID != userID {
+		writeError(w, http.StatusForbidden, "Not your project")
+		return
+	}
+
+	var req struct {
+		Model          string `json:"model"`
+		RPM            int    `json:"rpm"`
+		TPM            int    `json:"tpm"`
+		RPD            int    `json:"rpd"`
+		MaxInputTokens int    `json:"max_input_tokens"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	if req.Model == "" {
+		writeError(w, http.StatusBadRequest, "Model name is required")
+		return
+	}
+
+	// Validate model name
+	validModels := map[string]bool{
+		"gemini-2.5-flash": true,
+		"gemma-3-12b-it":   true,
+		"gemma-3-27b-it":   true,
+		"gemini-2.0-flash": true,
+	}
+	if !validModels[req.Model] {
+		writeError(w, http.StatusBadRequest, "Invalid model name")
+		return
+	}
+
+	log.Printf("[DB] UPDATE projects SET llm_model='%s' rpm=%d tpm=%d rpd=%d max_input=%d WHERE id=%s",
+		req.Model, req.RPM, req.TPM, req.RPD, req.MaxInputTokens, projectID)
+
+	_, err = h.DB.Pool.Exec(r.Context(),
+		`UPDATE projects SET llm_model = $1, llm_rpm = $2, llm_tpm = $3, llm_rpd = $4, max_input_tokens = $5, updated_at = NOW()
+		 WHERE id = $6`,
+		req.Model, req.RPM, req.TPM, req.RPD, req.MaxInputTokens, projectID,
+	)
+	if err != nil {
+		log.Printf("[DB] ERROR updating model selection: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to save model selection")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Model selection saved successfully",
+	})
+}
 
 // stripHTMLTags does a basic HTML tag removal for uploaded .html files.
 func stripHTMLTags(s string) string {
