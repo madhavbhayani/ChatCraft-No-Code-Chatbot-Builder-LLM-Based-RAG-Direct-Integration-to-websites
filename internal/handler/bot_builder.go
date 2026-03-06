@@ -31,9 +31,60 @@ func NewBotBuilderHandler(db *database.DB) *BotBuilderHandler {
 
 // ---------- Step 1: Crawl Website ----------
 
+// DiscoverSubdomainsRequest is the JSON body for subdomain discovery.
+type DiscoverSubdomainsRequest struct {
+	Domain string `json:"domain"`
+}
+
+// DiscoverSubdomains discovers subdomains for a domain via crt.sh and DNS validation.
+func (h *BotBuilderHandler) DiscoverSubdomains(w http.ResponseWriter, r *http.Request) {
+	userID := r.Header.Get("X-User-ID")
+	projectID := r.PathValue("project_id")
+	if projectID == "" {
+		writeError(w, http.StatusBadRequest, "Project ID is required")
+		return
+	}
+
+	// Verify project belongs to user
+	var ownerID string
+	err := h.DB.Pool.QueryRow(r.Context(),
+		"SELECT user_id FROM projects WHERE id = $1", projectID,
+	).Scan(&ownerID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "Project not found")
+		return
+	}
+	if ownerID != userID {
+		writeError(w, http.StatusForbidden, "Not your project")
+		return
+	}
+
+	var req DiscoverSubdomainsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	req.Domain = strings.TrimSpace(req.Domain)
+	if req.Domain == "" {
+		writeError(w, http.StatusBadRequest, "Domain is required")
+		return
+	}
+
+	result, err := service.DiscoverSubdomains(req.Domain)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Subdomain discovery failed: "+err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
 // CrawlRequest is the JSON body for POST /api/v1/console/crawl/{project_id}
 type CrawlRequest struct {
-	URL string `json:"url"`
+	URL  string   `json:"url"`
+	URLs []string `json:"urls"`
 }
 
 // CrawlWebsite starts an async crawl job and returns 202 immediately.
@@ -65,15 +116,30 @@ func (h *BotBuilderHandler) CrawlWebsite(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	req.URL = strings.TrimSpace(req.URL)
-	if req.URL == "" {
-		writeError(w, http.StatusBadRequest, "URL is required")
-		return
+	// Build the list of URLs to crawl (support both single url and urls array)
+	var crawlURLs []string
+	if len(req.URLs) > 0 {
+		for _, u := range req.URLs {
+			u = strings.TrimSpace(u)
+			if u == "" {
+				continue
+			}
+			if !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
+				u = "https://" + u
+			}
+			crawlURLs = append(crawlURLs, u)
+		}
+	} else if strings.TrimSpace(req.URL) != "" {
+		u := strings.TrimSpace(req.URL)
+		if !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
+			u = "https://" + u
+		}
+		crawlURLs = []string{u}
 	}
 
-	// Ensure URL has scheme
-	if !strings.HasPrefix(req.URL, "http://") && !strings.HasPrefix(req.URL, "https://") {
-		req.URL = "https://" + req.URL
+	if len(crawlURLs) == 0 {
+		writeError(w, http.StatusBadRequest, "At least one URL is required")
+		return
 	}
 
 	// Check if there's already an active crawl job for this project
@@ -83,7 +149,6 @@ func (h *BotBuilderHandler) CrawlWebsite(w http.ResponseWriter, r *http.Request)
 		projectID,
 	).Scan(&activeJobID)
 	if err == nil && activeJobID != "" {
-		// Already running — return the existing job ID
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -93,16 +158,16 @@ func (h *BotBuilderHandler) CrawlWebsite(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Update project website_url
-	log.Printf("[DB] UPDATE projects SET website_url = '%s' WHERE id = %s", req.URL, projectID)
+	// Update project website_urls (array) and legacy website_url (first URL)
+	log.Printf("[DB] UPDATE projects SET website_urls = %v WHERE id = %s", crawlURLs, projectID)
 	_, err = h.DB.Pool.Exec(r.Context(),
-		"UPDATE projects SET website_url = $1, updated_at = NOW() WHERE id = $2",
-		req.URL, projectID,
+		"UPDATE projects SET website_urls = $1, website_url = $2, updated_at = NOW() WHERE id = $3",
+		crawlURLs, crawlURLs[0], projectID,
 	)
 	if err != nil {
-		log.Printf("[DB] ERROR update project URL: %v", err)
+		log.Printf("[DB] ERROR update project URLs: %v", err)
 	} else {
-		log.Printf("[DB] OK updated project website_url")
+		log.Printf("[DB] OK updated project website_urls")
 	}
 
 	// Insert crawl job with status = 'queued'
@@ -121,7 +186,7 @@ func (h *BotBuilderHandler) CrawlWebsite(w http.ResponseWriter, r *http.Request)
 	log.Printf("[DB] OK inserted crawl_jobs id=%s", jobID)
 
 	// Launch background goroutine
-	go h.runCrawlJob(jobID, projectID, req.URL)
+	go h.runCrawlJob(jobID, projectID, crawlURLs)
 
 	// Return 202 Accepted with job_id
 	w.Header().Set("Content-Type", "application/json")
@@ -204,9 +269,9 @@ func (h *BotBuilderHandler) writeCrawlProgress(jobID string, p *crawlProgress, f
 }
 
 // runCrawlJob performs crawling, incremental hash comparison, chunking in background.
-func (h *BotBuilderHandler) runCrawlJob(jobID, projectID, crawlURL string) {
+func (h *BotBuilderHandler) runCrawlJob(jobID, projectID string, crawlURLs []string) {
 	ctx := context.Background()
-	log.Printf("[crawl-job] STARTING job=%s project=%s url=%s", jobID, projectID, crawlURL)
+	log.Printf("[crawl-job] STARTING job=%s project=%s urls=%v", jobID, projectID, crawlURLs)
 
 	// Progress tracker — writes directly to DB at key moments
 	prog := newCrawlProgress()
@@ -224,40 +289,57 @@ func (h *BotBuilderHandler) runCrawlJob(jobID, projectID, crawlURL string) {
 
 	// 2. Write initial progress with phase + logs
 	prog.Phase = "crawling"
-	prog.addLog("Starting crawl for " + crawlURL)
-	prog.addLog("Discovering sitemap and robots.txt...")
+	prog.addLog(fmt.Sprintf("Starting crawl for %d URL(s)", len(crawlURLs)))
 	h.writeCrawlProgress(jobID, prog, true) // force=true
 
-	// --- CRAWL (this blocks for a while — but now reports per-page progress) ---
-	log.Printf("[crawl-job] SmartCrawl starting for %s", crawlURL)
-	result, err := service.SmartCrawl(crawlURL, func(pagesFound, thinSkipped, errors int, currentURL string) {
-		// This callback is called from inside SmartCrawl for every page
-		prog.TotalURLs = pagesFound + thinSkipped + errors
-		prog.CrawledURLs = pagesFound
-		prog.SkippedURLs = thinSkipped
-		prog.addLog(fmt.Sprintf("Found page (%d total, %d skipped): %s", pagesFound, thinSkipped, currentURL))
-		h.writeCrawlProgress(jobID, prog, false) // throttled — writes max every 3s
-	})
-	if err != nil {
-		log.Printf("[crawl-job] SmartCrawl FAILED: %v", err)
+	// --- CRAWL ALL URLs ---
+	var allPages []service.PageContent
+	var totalThinSkipped, totalErrors int
+
+	for i, crawlURL := range crawlURLs {
+		prog.addLog(fmt.Sprintf("Crawling URL %d/%d: %s", i+1, len(crawlURLs), crawlURL))
+		h.writeCrawlProgress(jobID, prog, true)
+
+		log.Printf("[crawl-job] SmartCrawl starting for %s", crawlURL)
+		result, err := service.SmartCrawl(crawlURL, func(pagesFound, thinSkipped, errors int, currentURL string) {
+			prog.TotalURLs = len(allPages) + pagesFound + thinSkipped + errors + totalThinSkipped + totalErrors
+			prog.CrawledURLs = len(allPages) + pagesFound
+			prog.SkippedURLs = totalThinSkipped + thinSkipped
+			prog.addLog(fmt.Sprintf("Found page (%d total, %d skipped): %s", len(allPages)+pagesFound, totalThinSkipped+thinSkipped, currentURL))
+			h.writeCrawlProgress(jobID, prog, false)
+		})
+		if err != nil {
+			log.Printf("[crawl-job] SmartCrawl FAILED for %s: %v", crawlURL, err)
+			prog.addLog(fmt.Sprintf("⚠ Failed to crawl %s: %s (continuing with others)", crawlURL, err.Error()))
+			h.writeCrawlProgress(jobID, prog, true)
+			continue
+		}
+
+		log.Printf("[crawl-job] SmartCrawl DONE for %s: %d pages, %d thin skipped",
+			crawlURL, len(result.Pages), result.Report.ThinContentSkipped)
+		allPages = append(allPages, result.Pages...)
+		totalThinSkipped += result.Report.ThinContentSkipped
+		totalErrors += result.Report.ErrorCount
+		prog.addLog(fmt.Sprintf("✓ Crawled %s: %d pages extracted", crawlURL, len(result.Pages)))
+		h.writeCrawlProgress(jobID, prog, true)
+	}
+
+	if len(allPages) == 0 {
 		prog.Phase = "failed"
-		prog.addLog(fmt.Sprintf("Crawl failed: %s", err.Error()))
-		h.writeCrawlProgress(jobID, prog, true) // force write final state
+		prog.addLog("No pages were crawled from any URL")
+		h.writeCrawlProgress(jobID, prog, true)
 		now := time.Now()
 		h.DB.Pool.Exec(ctx,
 			"UPDATE crawl_jobs SET status = 'failed', error_message = $1, finished_at = $2, current_phase = 'failed' WHERE id = $3",
-			err.Error(), now, jobID,
+			"No pages crawled", now, jobID,
 		)
-		log.Printf("[DB] UPDATE crawl_jobs SET status='failed' WHERE id = %s", jobID)
 		return
 	}
-	log.Printf("[crawl-job] SmartCrawl DONE: %d pages, %d thin skipped",
-		len(result.Pages), result.Report.ThinContentSkipped)
 
-	totalDiscovered := len(result.Pages) + result.Report.ThinContentSkipped + result.Report.ErrorCount
+	totalDiscovered := len(allPages) + totalThinSkipped + totalErrors
 	prog.TotalURLs = totalDiscovered
 	prog.addLog(fmt.Sprintf("Crawl complete: %d pages extracted, %d thin-content skipped",
-		len(result.Pages), result.Report.ThinContentSkipped))
+		len(allPages), totalThinSkipped))
 	h.writeCrawlProgress(jobID, prog, true) // force
 
 	// --- INCREMENTAL HASH COMPARISON ---
@@ -288,7 +370,7 @@ func (h *BotBuilderHandler) runCrawlJob(jobID, projectID, crawlURL string) {
 	skippedCount := 0
 
 	prog.Phase = "processing"
-	for i, page := range result.Pages {
+	for i, page := range allPages {
 		newURLs[page.URL] = true
 		rawContent := service.ComposeRawContent(page)
 		newHash := fmt.Sprintf("%x", sha256.Sum256([]byte(rawContent)))
@@ -328,7 +410,7 @@ func (h *BotBuilderHandler) runCrawlJob(jobID, projectID, crawlURL string) {
 		prog.SkippedURLs = skippedCount
 
 		// Force write every 5 pages; throttled otherwise
-		forceWrite := (i+1)%5 == 0 || i == len(result.Pages)-1
+		forceWrite := (i+1)%5 == 0 || i == len(allPages)-1
 		h.writeCrawlProgress(jobID, prog, forceWrite)
 	}
 
@@ -590,12 +672,36 @@ func (h *BotBuilderHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Auto-chunk the uploaded document so it's ready for embedding
+	chunks := service.SmartChunkText(header.Filename, textContent, 400, 50)
+	totalChunks := 0
+	for _, chunk := range chunks {
+		chunkID := uuid.New().String()
+		_, err := h.DB.Pool.Exec(r.Context(),
+			`INSERT INTO chunks (id, document_id, project_id, chunk_index, content, created_at)
+			 VALUES ($1, $2, $3, $4, $5, NOW())`,
+			chunkID, docID, projectID, chunk.Index, chunk.Content,
+		)
+		if err != nil {
+			log.Printf("[upload-chunk] insert error: %v", err)
+			continue
+		}
+		totalChunks++
+	}
+
+	// Mark document as chunked
+	_, _ = h.DB.Pool.Exec(r.Context(),
+		"UPDATE documents SET status = 'chunked' WHERE id = $1", docID,
+	)
+	log.Printf("[upload] File %s: inserted doc %s with %d chunks", header.Filename, docID[:8], totalChunks)
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"message":     "File uploaded successfully",
-		"document_id": docID,
-		"filename":    header.Filename,
-		"words":       len(strings.Fields(textContent)),
+		"message":      "File uploaded and chunked successfully",
+		"document_id":  docID,
+		"filename":     header.Filename,
+		"words":        len(strings.Fields(textContent)),
+		"total_chunks": totalChunks,
 	})
 }
 
@@ -914,17 +1020,18 @@ func (h *BotBuilderHandler) GetSetupStatus(w http.ResponseWriter, r *http.Reques
 
 	// Verify ownership
 	var ownerID, websiteURL string
+	var websiteURLs []string
 	var setupStep int
 	var hasAPIKey bool
 	var llmModel string
 	var llmRPM, llmTPM, llmRPD, maxInputTokens int
 	err := h.DB.Pool.QueryRow(r.Context(),
-		`SELECT user_id, COALESCE(website_url, ''), setup_step, 
+		`SELECT user_id, COALESCE(website_url, ''), COALESCE(website_urls, '{}'), setup_step, 
 		        (gemini_api_key_encrypted IS NOT NULL AND gemini_api_key_encrypted != ''),
 		        COALESCE(llm_model, 'gemini-2.5-flash'), COALESCE(llm_rpm, 5), COALESCE(llm_tpm, 250000),
 		        COALESCE(llm_rpd, 20), COALESCE(max_input_tokens, 50000)
 		 FROM projects WHERE id = $1`, projectID,
-	).Scan(&ownerID, &websiteURL, &setupStep, &hasAPIKey, &llmModel, &llmRPM, &llmTPM, &llmRPD, &maxInputTokens)
+	).Scan(&ownerID, &websiteURL, &websiteURLs, &setupStep, &hasAPIKey, &llmModel, &llmRPM, &llmTPM, &llmRPD, &maxInputTokens)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "Project not found")
 		return
@@ -941,13 +1048,16 @@ func (h *BotBuilderHandler) GetSetupStatus(w http.ResponseWriter, r *http.Reques
 	).Scan(&docCount)
 
 	// Count chunks
-	var chunkCount, embeddedCount int
+	var chunkCount, embeddedCount, pendingChunks int
 	h.DB.Pool.QueryRow(r.Context(),
 		"SELECT COUNT(*) FROM chunks WHERE project_id = $1", projectID,
 	).Scan(&chunkCount)
 	h.DB.Pool.QueryRow(r.Context(),
 		"SELECT COUNT(*) FROM chunks WHERE project_id = $1 AND embedding IS NOT NULL", projectID,
 	).Scan(&embeddedCount)
+	h.DB.Pool.QueryRow(r.Context(),
+		"SELECT COUNT(*) FROM chunks WHERE project_id = $1 AND embedding IS NULL", projectID,
+	).Scan(&pendingChunks)
 
 	// Get document list
 	docRows, err := h.DB.Pool.Query(r.Context(),
@@ -1000,10 +1110,12 @@ func (h *BotBuilderHandler) GetSetupStatus(w http.ResponseWriter, r *http.Reques
 	resp := map[string]interface{}{
 		"setup_step":       setupStep,
 		"website_url":      websiteURL,
+		"website_urls":     websiteURLs,
 		"has_api_key":      hasAPIKey,
 		"document_count":   docCount,
 		"chunk_count":      chunkCount,
 		"embedded_count":   embeddedCount,
+		"pending_chunks":   pendingChunks,
 		"documents":        documents,
 		"llm_model":        llmModel,
 		"llm_rpm":          llmRPM,
@@ -1018,6 +1130,113 @@ func (h *BotBuilderHandler) GetSetupStatus(w http.ResponseWriter, r *http.Reques
 		resp["active_embed_job_id"] = *activeEmbedJobID
 	}
 	json.NewEncoder(w).Encode(resp)
+}
+
+// ---------- Re-Embed All Chunks ----------
+
+// ReEmbedAll clears all embeddings and starts a fresh embed job.
+func (h *BotBuilderHandler) ReEmbedAll(w http.ResponseWriter, r *http.Request) {
+	userID := r.Header.Get("X-User-ID")
+	projectID := r.PathValue("project_id")
+	if projectID == "" {
+		writeError(w, http.StatusBadRequest, "Project ID is required")
+		return
+	}
+
+	// Verify ownership
+	var ownerID string
+	err := h.DB.Pool.QueryRow(r.Context(),
+		"SELECT user_id FROM projects WHERE id = $1", projectID,
+	).Scan(&ownerID)
+	if err != nil || ownerID != userID {
+		writeError(w, http.StatusForbidden, "Not your project")
+		return
+	}
+
+	// Get decrypted API key
+	var encryptedKey string
+	err = h.DB.Pool.QueryRow(r.Context(),
+		"SELECT gemini_api_key_encrypted FROM projects WHERE id = $1", projectID,
+	).Scan(&encryptedKey)
+	if err != nil || encryptedKey == "" {
+		writeError(w, http.StatusBadRequest, "Gemini API key not configured")
+		return
+	}
+
+	apiKey, err := service.DecryptString(encryptedKey)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to decrypt API key")
+		return
+	}
+
+	// Check if there's already an active embed job
+	var activeEmbedJobID string
+	err = h.DB.Pool.QueryRow(r.Context(),
+		"SELECT id FROM embed_jobs WHERE project_id = $1 AND status IN ('queued', 'running') ORDER BY started_at DESC LIMIT 1",
+		projectID,
+	).Scan(&activeEmbedJobID)
+	if err == nil && activeEmbedJobID != "" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"message": "Embed job already running",
+			"job_id":  activeEmbedJobID,
+		})
+		return
+	}
+
+	// Clear ALL embeddings — set them to NULL
+	log.Printf("[re-embed-all] Clearing all embeddings for project %s", projectID)
+	_, err = h.DB.Pool.Exec(r.Context(),
+		"UPDATE chunks SET embedding = NULL WHERE project_id = $1", projectID,
+	)
+	if err != nil {
+		log.Printf("[re-embed-all] ERROR clearing embeddings: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to clear embeddings")
+		return
+	}
+
+	// Reset document statuses from 'embedded' back to 'chunked'
+	_, _ = h.DB.Pool.Exec(r.Context(),
+		"UPDATE documents SET status = 'chunked' WHERE project_id = $1 AND status = 'embedded'", projectID,
+	)
+
+	// Count total chunks to embed
+	var totalChunks int
+	h.DB.Pool.QueryRow(r.Context(),
+		"SELECT COUNT(*) FROM chunks WHERE project_id = $1", projectID,
+	).Scan(&totalChunks)
+	if totalChunks == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"message":  "No chunks to embed",
+			"embedded": 0,
+		})
+		return
+	}
+
+	// Insert embed job
+	jobID := uuid.New().String()
+	_, err = h.DB.Pool.Exec(r.Context(),
+		`INSERT INTO embed_jobs (id, project_id, status, total_chunks, started_at)
+		 VALUES ($1, $2, 'queued', $3, NOW())`,
+		jobID, projectID, totalChunks,
+	)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to create embed job")
+		return
+	}
+
+	// Launch background goroutine
+	go h.runEmbedJob(jobID, projectID, apiKey)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Re-embedding all chunks",
+		"job_id":  jobID,
+		"total":   totalChunks,
+	})
 }
 
 // ---------- Console: Knowledge Base Endpoints ----------
@@ -1261,7 +1480,7 @@ func (h *BotBuilderHandler) DeleteProjectData(w http.ResponseWriter, r *http.Req
 
 	// Reset project setup_step to 0
 	_, err = h.DB.Pool.Exec(ctx,
-		"UPDATE projects SET setup_step = 0, website_url = NULL, status = 'draft', updated_at = NOW() WHERE id = $1",
+		"UPDATE projects SET setup_step = 0, website_url = NULL, website_urls = '{}', status = 'draft', updated_at = NOW() WHERE id = $1",
 		projectID,
 	)
 	if err != nil {

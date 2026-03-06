@@ -41,12 +41,13 @@ func (h *ProjectHandler) GetProject(w http.ResponseWriter, r *http.Request) {
 	var project model.Project
 	err := h.DB.Pool.QueryRow(r.Context(),
 		`SELECT id, user_id, name, description, status, 
-		        COALESCE(website_url, ''), COALESCE(bot_name, ''), 
+		        COALESCE(website_url, ''), COALESCE(website_urls, '{}'),
+		        COALESCE(bot_name, ''), 
 		        COALESCE(system_prompt, ''), setup_step,
 		        created_at, updated_at
 		 FROM projects WHERE user_id = $1`, userID,
 	).Scan(&project.ID, &project.UserID, &project.Name, &project.Description,
-		&project.Status, &project.WebsiteURL, &project.BotName,
+		&project.Status, &project.WebsiteURL, &project.WebsiteURLs, &project.BotName,
 		&project.SystemPrompt, &project.SetupStep,
 		&project.CreatedAt, &project.UpdatedAt)
 

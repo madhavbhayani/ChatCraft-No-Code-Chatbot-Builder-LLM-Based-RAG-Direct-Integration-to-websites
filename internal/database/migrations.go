@@ -201,6 +201,13 @@ var migrations = []struct {
 			ALTER TABLE projects ADD COLUMN IF NOT EXISTS max_input_tokens INT DEFAULT 50000;
 		`,
 	},
+	{
+		Name: "015_add_website_urls_array",
+		SQL: `
+			ALTER TABLE projects ADD COLUMN IF NOT EXISTS website_urls TEXT[] DEFAULT '{}';
+			UPDATE projects SET website_urls = ARRAY[website_url] WHERE website_url IS NOT NULL AND website_url != '' AND (website_urls IS NULL OR website_urls = '{}');
+		`,
+	},
 }
 
 // RunMigrations applies all pending migrations.

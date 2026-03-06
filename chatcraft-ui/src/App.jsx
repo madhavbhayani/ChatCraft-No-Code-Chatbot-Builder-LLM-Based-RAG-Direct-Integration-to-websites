@@ -37,7 +37,7 @@ function App() {
         <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/docs" element={<DocsPage />} />
         <Route path="/console" element={<ConsoleRedirect />} />
-        <Route path="/console/:projectId" element={<ConsolePage />} />
+        <Route path="/console/:projectId/*" element={<ConsolePage />} />
         <Route path="/console/integrate/:projectId" element={<IntegratePage />} />
       </Routes>
     </BrowserRouter>

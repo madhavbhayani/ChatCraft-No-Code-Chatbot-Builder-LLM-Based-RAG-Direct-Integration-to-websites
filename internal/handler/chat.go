@@ -102,7 +102,7 @@ func (h *ChatHandler) Chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 4: Vector similarity search
+	// Step 4: Vector similarity search — use a lower threshold to catch conceptual matches
 	vec := pgvector.NewVector(questionEmbedding)
 	rows, err := h.DB.Pool.Query(ctx,
 		`SELECT c.content, d.source_url,
@@ -110,9 +110,10 @@ func (h *ChatHandler) Chat(w http.ResponseWriter, r *http.Request) {
 		 FROM chunks c
 		 JOIN documents d ON c.document_id = d.id
 		 WHERE c.project_id = $2
-		   AND 1 - (c.embedding <=> $1) > 0.65
+		   AND c.embedding IS NOT NULL
+		   AND 1 - (c.embedding <=> $1) > 0.35
 		 ORDER BY similarity DESC
-		 LIMIT 5`,
+		 LIMIT 8`,
 		vec, projectID,
 	)
 	if err != nil {
@@ -136,6 +137,49 @@ func (h *ChatHandler) Chat(w http.ResponseWriter, r *http.Request) {
 		results = append(results, sr)
 	}
 
+	// Step 4b: Keyword fallback — if vector search found < 2 results, try keyword matching
+	if len(results) < 2 {
+		// Extract meaningful words (3+ chars) from the question for keyword search
+		words := strings.Fields(strings.ToLower(req.Message))
+		var keywords []string
+		for _, w := range words {
+			cleaned := strings.Trim(w, ".,!?\"'()[]{}:;")
+			if len(cleaned) >= 3 {
+				keywords = append(keywords, cleaned)
+			}
+		}
+		if len(keywords) > 0 {
+			// Build a query that matches any keyword in chunk content
+			likePattern := "%" + strings.Join(keywords, "%") + "%"
+			kwRows, kwErr := h.DB.Pool.Query(ctx,
+				`SELECT c.content, d.source_url, 0.40 AS similarity
+				 FROM chunks c
+				 JOIN documents d ON c.document_id = d.id
+				 WHERE c.project_id = $1
+				   AND LOWER(c.content) LIKE $2
+				 LIMIT 5`,
+				projectID, likePattern,
+			)
+			if kwErr == nil {
+				existingIDs := make(map[string]bool)
+				for _, r := range results {
+					existingIDs[r.Content[:min(50, len(r.Content))]] = true
+				}
+				for kwRows.Next() {
+					var sr searchResult
+					if kwRows.Scan(&sr.Content, &sr.SourceURL, &sr.Similarity) == nil {
+						key := sr.Content[:min(50, len(sr.Content))]
+						if !existingIDs[key] {
+							results = append(results, sr)
+							existingIDs[key] = true
+						}
+					}
+				}
+				kwRows.Close()
+			}
+		}
+	}
+
 	// Step 5: Confidence check
 	var topScore float64
 	if len(results) > 0 {
@@ -152,7 +196,7 @@ func (h *ChatHandler) Chat(w http.ResponseWriter, r *http.Request) {
 		assistantName = botName
 	}
 
-	if len(results) == 0 || topScore < 0.65 {
+	if len(results) == 0 {
 		// No relevant results — use LLM to generate a helpful fallback
 		fallbackPrompt := fmt.Sprintf(
 			`You are a helpful assistant for %s.
@@ -181,8 +225,8 @@ Be concise, friendly, and professional. Keep response under 80 words.`,
 	}
 
 	// Step 6: Build RAG prompt and call Gemini
-	// Take top 3 chunks for context
-	contextLimit := 3
+	// Take top 5 chunks for richer context
+	contextLimit := 5
 	if len(results) < contextLimit {
 		contextLimit = len(results)
 	}
@@ -209,10 +253,11 @@ Be concise, friendly, and professional. Keep response under 80 words.`,
 	if sysPrompt == "" {
 		sysPrompt = fmt.Sprintf(
 			`You are a helpful assistant for %s.
-Answer ONLY using the context provided below.
-If the answer is not in the context, say: "I don't have that information. Please contact support."
+Answer using the context provided below. Base your response on the most relevant information you find in the context.
+If the context contains related concepts, use them to construct a helpful answer even if the exact terms differ.
+If the answer is truly not in the context at all, say: "I don't have that information. Please contact support."
 Be concise and friendly.
-Keep your answer under 150 words unless the question requires more detail.`,
+Keep your answer under 200 words unless the question requires more detail.`,
 			assistantName,
 		)
 	}

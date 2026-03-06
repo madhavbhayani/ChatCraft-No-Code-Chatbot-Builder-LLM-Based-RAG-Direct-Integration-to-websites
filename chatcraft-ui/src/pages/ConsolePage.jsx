@@ -1,5 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import {
+  useNavigate,
+  useParams,
+  useLocation,
+  Routes,
+  Route,
+  Navigate,
+} from "react-router-dom";
 import {
   Database,
   MessageSquare,
@@ -30,26 +37,22 @@ import {
   Save,
   RotateCcw,
   Cpu,
+  FolderCog,
+  ChevronDown,
 } from "lucide-react";
 import { toast } from "sonner";
 import { getSession, isLoggedIn } from "../utils/auth";
 
 const API = "/api/v1";
 
-const NAV_ITEMS = [
-  { id: "knowledge", label: "Knowledge Base", icon: Database },
-  { id: "chat", label: "Test Chat", icon: MessageSquare },
-  { id: "settings", label: "Settings", icon: Settings },
-];
-
 // ─── Main Console Page ───────────────────────────────────────────────────────
 
 export default function ConsolePage() {
   const navigate = useNavigate();
   const { projectId } = useParams();
+  const location = useLocation();
   const [loading, setLoading] = useState(true);
   const [projectName, setProjectName] = useState("");
-  const [activeSection, setActiveSection] = useState("knowledge");
 
   // Knowledge Base state
   const [documents, setDocuments] = useState([]);
@@ -84,6 +87,9 @@ export default function ConsolePage() {
   // Model state
   const [selectedModel, setSelectedModel] = useState("gemini-2.5-flash");
   const [savingModel, setSavingModel] = useState(false);
+
+  // Project Settings dropdown
+  const [psOpen, setPsOpen] = useState(false);
 
   const getToken = useCallback(() => {
     const session = getSession();
@@ -181,6 +187,22 @@ export default function ConsolePage() {
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
   };
+
+  // Determine active section from URL path
+  const pathAfterProject = location.pathname.replace(
+    `/console/${projectId}`,
+    ""
+  );
+  const activeSection = pathAfterProject.startsWith("/project-settings")
+    ? "project-settings"
+    : pathAfterProject === "/test-chat"
+    ? "chat"
+    : "knowledge";
+
+  // Project settings sub-tab from path
+  const psSubTab = pathAfterProject.startsWith("/project-settings/")
+    ? pathAfterProject.replace("/project-settings/", "")
+    : "general";
 
   // ─── Chat ────────────────────────────────────
 
@@ -283,7 +305,9 @@ export default function ConsolePage() {
   };
 
   const handleReCrawl = async () => {
-    if (!statusData?.website_url) {
+    const urls = statusData?.website_urls;
+    const legacyUrl = statusData?.website_url;
+    if ((!urls || urls.length === 0) && !legacyUrl) {
       toast.error("No website URL configured");
       return;
     }
@@ -294,28 +318,12 @@ export default function ConsolePage() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${getToken()}`,
         },
-        body: JSON.stringify({ url: statusData.website_url }),
+        body: JSON.stringify(urls && urls.length > 0 ? { urls } : { url: legacyUrl }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed");
       toast.success("Crawl job started! Go to Setup to monitor progress.");
       navigate(`/console/integrate/${projectId}`);
-    } catch (err) {
-      toast.error(err.message);
-    }
-  };
-
-  const handleReChunk = async () => {
-    try {
-      const res = await fetch(`${API}/console/chunk/${projectId}`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${getToken()}` },
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed");
-      toast.success(data.message || "Chunks regenerated");
-      refreshStatus();
-      fetchDocuments();
     } catch (err) {
       toast.error(err.message);
     }
@@ -330,6 +338,21 @@ export default function ConsolePage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed");
       toast.success("Embedding job started! Go to Setup to monitor.");
+      navigate(`/console/integrate/${projectId}`);
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
+  const handleReEmbedAll = async () => {
+    try {
+      const res = await fetch(`${API}/console/re-embed/${projectId}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed");
+      toast.success("Re-embedding all chunks! Go to Setup to monitor.");
       navigate(`/console/integrate/${projectId}`);
     } catch (err) {
       toast.error(err.message);
@@ -446,20 +469,96 @@ export default function ConsolePage() {
         </div>
 
         <nav className="flex-1 px-3 py-4 space-y-1">
-          {NAV_ITEMS.map((item) => (
+          {/* Knowledge Base */}
+          <button
+            onClick={() =>
+              navigate(`/console/${projectId}/knowledge-base`)
+            }
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all cursor-pointer ${
+              activeSection === "knowledge"
+                ? "bg-crimson text-white shadow-lg shadow-crimson/25"
+                : "text-gray-400 hover:text-white hover:bg-white/5"
+            }`}
+          >
+            <Database size={17} />
+            Knowledge Base
+          </button>
+
+          {/* Test Chat */}
+          <button
+            onClick={() => navigate(`/console/${projectId}/test-chat`)}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all cursor-pointer ${
+              activeSection === "chat"
+                ? "bg-crimson text-white shadow-lg shadow-crimson/25"
+                : "text-gray-400 hover:text-white hover:bg-white/5"
+            }`}
+          >
+            <MessageSquare size={17} />
+            Test Chat
+          </button>
+
+          {/* Project Settings with dropdown */}
+          <div>
             <button
-              key={item.id}
-              onClick={() => setActiveSection(item.id)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all cursor-pointer ${
-                activeSection === item.id
+              onClick={() => {
+                setPsOpen(!psOpen);
+                if (!pathAfterProject.startsWith("/project-settings")) {
+                  navigate(
+                    `/console/${projectId}/project-settings/general`
+                  );
+                }
+              }}
+              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-all cursor-pointer ${
+                activeSection === "project-settings"
                   ? "bg-crimson text-white shadow-lg shadow-crimson/25"
                   : "text-gray-400 hover:text-white hover:bg-white/5"
               }`}
             >
-              <item.icon size={17} />
-              {item.label}
+              <span className="flex items-center gap-3">
+                <FolderCog size={17} />
+                Project Settings
+              </span>
+              <ChevronDown
+                size={14}
+                className={`transition-transform ${
+                  psOpen || activeSection === "project-settings"
+                    ? "rotate-180"
+                    : ""
+                }`}
+              />
             </button>
-          ))}
+
+            {(psOpen || activeSection === "project-settings") && (
+              <div className="ml-8 mt-1 space-y-0.5">
+                {[
+                  { id: "general", label: "General", icon: Edit3 },
+                  { id: "llm-models", label: "LLM Models", icon: Cpu },
+                  {
+                    id: "re-integration",
+                    label: "Re-Integration",
+                    icon: RefreshCw,
+                  },
+                ].map((sub) => (
+                  <button
+                    key={sub.id}
+                    onClick={() =>
+                      navigate(
+                        `/console/${projectId}/project-settings/${sub.id}`
+                      )
+                    }
+                    className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-md text-xs font-medium transition cursor-pointer ${
+                      psSubTab === sub.id
+                        ? "text-white bg-white/10"
+                        : "text-gray-500 hover:text-gray-300 hover:bg-white/5"
+                    }`}
+                  >
+                    <sub.icon size={13} />
+                    {sub.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </nav>
 
         <div className="px-3 pb-4 space-y-1">
@@ -469,6 +568,13 @@ export default function ConsolePage() {
           >
             <Zap size={14} />
             Setup Wizard
+          </button>
+          <button
+            onClick={() => navigate("/account")}
+            className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs text-gray-500 hover:text-gray-300 hover:bg-white/5 transition cursor-pointer"
+          >
+            <Settings size={14} />
+            Settings
           </button>
           <button
             onClick={() => navigate("/dashboard")}
@@ -482,74 +588,119 @@ export default function ConsolePage() {
 
       {/* ─── Main Content ─── */}
       <main className="flex-1 flex flex-col min-h-screen overflow-hidden">
-        {activeSection === "knowledge" && (
-          <KnowledgeBaseSection
-            documents={filteredDocs}
-            chunks={filteredChunks}
-            selectedDoc={selectedDoc}
-            setSelectedDoc={(doc) => {
-              setSelectedDoc(doc);
-              if (doc) {
-                fetchChunks(doc.id);
-                setViewMode("chunks");
-              }
-            }}
-            docSearch={docSearch}
-            setDocSearch={setDocSearch}
-            chunkSearch={chunkSearch}
-            setChunkSearch={setChunkSearch}
-            viewMode={viewMode}
-            setViewMode={(mode) => {
-              setViewMode(mode);
-              if (mode === "chunks" && chunks.length === 0) fetchChunks();
-            }}
-            loadingDocs={loadingDocs}
-            loadingChunks={loadingChunks}
-            copiedId={copiedId}
-            handleCopy={handleCopy}
-            statusData={statusData}
-            fetchChunks={fetchChunks}
-            setDetailDoc={setDetailDoc}
+        <Routes>
+          <Route
+            path="knowledge-base"
+            element={
+              <KnowledgeBaseSection
+                documents={filteredDocs}
+                chunks={filteredChunks}
+                selectedDoc={selectedDoc}
+                setSelectedDoc={(doc) => {
+                  setSelectedDoc(doc);
+                  if (doc) {
+                    fetchChunks(doc.id);
+                    setViewMode("chunks");
+                  }
+                }}
+                docSearch={docSearch}
+                setDocSearch={setDocSearch}
+                chunkSearch={chunkSearch}
+                setChunkSearch={setChunkSearch}
+                viewMode={viewMode}
+                setViewMode={(mode) => {
+                  setViewMode(mode);
+                  if (mode === "chunks" && chunks.length === 0) fetchChunks();
+                }}
+                loadingDocs={loadingDocs}
+                loadingChunks={loadingChunks}
+                copiedId={copiedId}
+                handleCopy={handleCopy}
+                statusData={statusData}
+                fetchChunks={fetchChunks}
+                setDetailDoc={setDetailDoc}
+              />
+            }
           />
-        )}
-        {activeSection === "chat" && (
-          <ChatSection
-            messages={messages}
-            chatInput={chatInput}
-            setChatInput={setChatInput}
-            sending={sending}
-            handleSendMessage={handleSendMessage}
-            chatEndRef={chatEndRef}
-            inputRef={inputRef}
-            statusData={statusData}
+          <Route
+            path="test-chat"
+            element={
+              <ChatSection
+                messages={messages}
+                chatInput={chatInput}
+                setChatInput={setChatInput}
+                sending={sending}
+                handleSendMessage={handleSendMessage}
+                chatEndRef={chatEndRef}
+                inputRef={inputRef}
+                statusData={statusData}
+                projectName={projectName}
+              />
+            }
           />
-        )}
-        {activeSection === "settings" && (
-          <SettingsSection
-            projectName={projectName}
-            statusData={statusData}
-            editingName={editingName}
-            setEditingName={(v) => {
-              setEditingName(v);
-              if (v) setNewName(projectName);
-            }}
-            newName={newName}
-            setNewName={setNewName}
-            savingName={savingName}
-            handleSaveName={handleSaveName}
-            apiKeyInput={apiKeyInput}
-            setApiKeyInput={setApiKeyInput}
-            savingKey={savingKey}
-            handleSaveApiKey={handleSaveApiKey}
-            handleReCrawl={handleReCrawl}
-            handleReChunk={handleReChunk}
-            handleReEmbed={handleReEmbed}
-            setConfirmAction={setConfirmAction}
-            selectedModel={selectedModel}
-            savingModel={savingModel}
-            handleSaveModel={handleSaveModel}
+          <Route
+            path="project-settings/general"
+            element={
+              <PSGeneral
+                projectName={projectName}
+                statusData={statusData}
+                editingName={editingName}
+                setEditingName={(v) => {
+                  setEditingName(v);
+                  if (v) setNewName(projectName);
+                }}
+                newName={newName}
+                setNewName={setNewName}
+                savingName={savingName}
+                handleSaveName={handleSaveName}
+                setConfirmAction={setConfirmAction}
+              />
+            }
           />
-        )}
+          <Route
+            path="project-settings/llm-models"
+            element={
+              <PSLlmModels
+                selectedModel={selectedModel}
+                savingModel={savingModel}
+                handleSaveModel={handleSaveModel}
+              />
+            }
+          />
+          <Route
+            path="project-settings/re-integration"
+            element={
+              <PSReIntegration
+                statusData={statusData}
+                apiKeyInput={apiKeyInput}
+                setApiKeyInput={setApiKeyInput}
+                savingKey={savingKey}
+                handleSaveApiKey={handleSaveApiKey}
+                handleReCrawl={handleReCrawl}
+                handleReEmbed={handleReEmbed}
+                handleReEmbedAll={handleReEmbedAll}
+              />
+            }
+          />
+          <Route
+            path="project-settings"
+            element={
+              <Navigate
+                to={`/console/${projectId}/project-settings/general`}
+                replace
+              />
+            }
+          />
+          <Route
+            path="*"
+            element={
+              <Navigate
+                to={`/console/${projectId}/knowledge-base`}
+                replace
+              />
+            }
+          />
+        </Routes>
       </main>
 
       {/* ─── Document Detail Modal ─── */}
@@ -629,9 +780,11 @@ function KnowledgeBaseSection({
           icon={<Globe size={18} />}
           label="Website"
           value={
-            statusData?.website_url
-              ? new URL(statusData.website_url).hostname
-              : "—"
+            statusData?.website_urls && statusData.website_urls.length > 0
+              ? statusData.website_urls.length + " URL" + (statusData.website_urls.length > 1 ? "s" : "")
+              : statusData?.website_url
+                ? new URL(statusData.website_url).hostname
+                : "—"
           }
           color="text-gray-600"
           bg="bg-gray-50"
@@ -1175,125 +1328,117 @@ function ChatSection({
   chatEndRef,
   inputRef,
   statusData,
+  projectName,
 }) {
   const canChat = statusData?.embedded_count > 0 && statusData?.has_api_key;
 
   return (
-    <div className="flex-1 flex flex-col max-w-4xl mx-auto w-full">
-      {/* Messages */}
-      <div
-        className="flex-1 overflow-y-auto px-6 py-6 space-y-4"
-        style={{ maxHeight: "calc(100vh - 140px)" }}
-      >
-        {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-16 text-center">
-            <div className="w-16 h-16 rounded-2xl bg-crimson/10 flex items-center justify-center mb-4">
-              <Bot size={28} className="text-crimson" />
-            </div>
-            <h3 className="text-lg font-bold text-charcoal mb-1">
-              Test Your Chatbot
-            </h3>
-            <p className="text-sm text-gray-500 max-w-md">
-              Ask questions to test how your chatbot responds using the
-              knowledge base. This uses the same RAG pipeline as your embedded
-              widget.
-            </p>
-
-            {!canChat && (
-              <div className="mt-6 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-700 max-w-sm">
-                {!statusData?.has_api_key
-                  ? "Add your Gemini API key first to test the chatbot."
-                  : "Embed your chunks first to enable chat testing."}
-              </div>
-            )}
-
-            {canChat && (
-              <div className="mt-6 grid grid-cols-2 gap-3 w-full max-w-md">
-                {[
-                  "What does this website offer?",
-                  "Tell me about pricing",
-                  "How can I get started?",
-                  "What are the main features?",
-                ].map((q) => (
-                  <button
-                    key={q}
-                    onClick={() => setChatInput(q)}
-                    className="text-left text-sm px-4 py-3 border border-gray-200 rounded-lg hover:border-crimson/30 hover:bg-crimson/5 transition-colors text-gray-600 cursor-pointer"
-                  >
-                    {q}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {messages.map((msg, idx) => (
-          <MessageBubble key={idx} message={msg} />
-        ))}
-
-        {sending && (
-          <div className="flex items-start gap-3">
-            <div className="w-8 h-8 rounded-lg bg-crimson/10 flex items-center justify-center shrink-0">
-              <Bot size={16} className="text-crimson" />
-            </div>
-            <div className="bg-white border border-gray-200 rounded-2xl rounded-tl-sm px-4 py-3">
-              <div className="flex items-center gap-1">
-                <span
-                  className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
-                  style={{ animationDelay: "0ms" }}
-                />
-                <span
-                  className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
-                  style={{ animationDelay: "150ms" }}
-                />
-                <span
-                  className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
-                  style={{ animationDelay: "300ms" }}
-                />
-              </div>
-            </div>
-          </div>
-        )}
-
-        <div ref={chatEndRef} />
+    <div className="flex-1 flex flex-col bg-[#F9FAFB]">
+      {/* Header */}
+      <div className="bg-white border-b border-gray-200 px-8 py-5">
+        <div className="max-w-3xl mx-auto">
+          <h2 className="text-lg font-bold text-charcoal">Test Chat</h2>
+          <p className="text-sm text-gray-500 mt-0.5">
+            Preview how your chatbot responds using the{" "}
+            <span className="font-medium text-charcoal">{projectName}</span>{" "}
+            knowledge base
+          </p>
+        </div>
       </div>
 
-      {/* Input */}
-      <div className="border-t border-gray-200 bg-white px-6 py-4">
-        <div className="flex items-center gap-3 max-w-4xl mx-auto">
-          <div className="flex-1 relative">
-            <input
-              ref={inputRef}
-              type="text"
-              value={chatInput}
-              onChange={(e) => setChatInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSendMessage();
+      {/* Messages area */}
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-3xl mx-auto px-8 py-8 space-y-5">
+          {messages.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-24 text-center">
+              <div className="w-14 h-14 rounded-2xl bg-crimson/10 flex items-center justify-center mb-5">
+                <Bot size={26} className="text-crimson" />
+              </div>
+              <h3 className="text-base font-bold text-charcoal mb-2">
+                Ready to chat
+              </h3>
+              <p className="text-sm text-gray-400 max-w-sm leading-relaxed">
+                {canChat
+                  ? "Type a message below to test your chatbot. Responses are generated using your embedded knowledge base."
+                  : !statusData?.has_api_key
+                  ? "Add your Gemini API key in Project Settings to enable chat."
+                  : "Embed your chunks first to enable chat. Go to Setup Wizard to complete the pipeline."}
+              </p>
+            </div>
+          )}
+
+          {messages.map((msg, idx) => (
+            <MessageBubble key={idx} message={msg} />
+          ))}
+
+          {sending && (
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 rounded-full bg-crimson/10 flex items-center justify-center shrink-0">
+                <Bot size={15} className="text-crimson" />
+              </div>
+              <div className="bg-white border border-gray-200 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm">
+                <div className="flex items-center gap-1.5">
+                  <span
+                    className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce"
+                    style={{ animationDelay: "0ms" }}
+                  />
+                  <span
+                    className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce"
+                    style={{ animationDelay: "150ms" }}
+                  />
+                  <span
+                    className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce"
+                    style={{ animationDelay: "300ms" }}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div ref={chatEndRef} />
+        </div>
+      </div>
+
+      {/* Input bar */}
+      <div className="bg-white border-t border-gray-200">
+        <div className="max-w-3xl mx-auto px-8 py-5">
+          <div className="flex items-center gap-3">
+            <div className="flex-1 relative">
+              <input
+                ref={inputRef}
+                type="text"
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSendMessage();
+                  }
+                }}
+                placeholder={
+                  canChat
+                    ? "Type your message..."
+                    : "Complete setup to enable chat"
                 }
-              }}
-              placeholder={
-                canChat
-                  ? "Ask a question to test your chatbot..."
-                  : "Complete setup to test chat"
-              }
-              disabled={!canChat || sending}
-              className="w-full px-4 py-3 pr-12 text-sm border border-gray-200 rounded-xl bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-crimson/20 focus:border-crimson/40 transition disabled:opacity-50 disabled:cursor-not-allowed"
-            />
+                disabled={!canChat || sending}
+                className="w-full px-5 py-3.5 text-sm border border-gray-200 rounded-xl bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-crimson/20 focus:border-crimson/40 transition placeholder:text-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
+              />
+            </div>
+            <button
+              onClick={handleSendMessage}
+              disabled={!canChat || sending || !chatInput.trim()}
+              className="w-12 h-12 rounded-xl bg-crimson text-white flex items-center justify-center hover:bg-red-700 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+            >
+              {sending ? (
+                <Loader2 size={18} className="animate-spin" />
+              ) : (
+                <Send size={18} />
+              )}
+            </button>
           </div>
-          <button
-            onClick={handleSendMessage}
-            disabled={!canChat || sending || !chatInput.trim()}
-            className="w-11 h-11 rounded-xl bg-crimson text-white flex items-center justify-center hover:bg-rose-pink transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
-          >
-            {sending ? (
-              <Loader2 size={18} className="animate-spin" />
-            ) : (
-              <Send size={18} />
-            )}
-          </button>
+          <p className="text-[11px] text-gray-400 mt-2 text-center">
+            Responses are generated using your knowledge base via RAG pipeline
+          </p>
         </div>
       </div>
     </div>
@@ -1421,14 +1566,14 @@ function MessageBubble({ message }) {
   return (
     <div className={`flex items-start gap-3 ${isUser ? "flex-row-reverse" : ""}`}>
       <div
-        className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+        className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
           isUser ? "bg-charcoal" : "bg-crimson/10"
         }`}
       >
         {isUser ? (
-          <User size={16} className="text-white" />
+          <User size={15} className="text-white" />
         ) : (
-          <Bot size={16} className="text-crimson" />
+          <Bot size={15} className="text-crimson" />
         )}
       </div>
 
@@ -1438,7 +1583,7 @@ function MessageBubble({ message }) {
             ? "bg-charcoal text-white rounded-2xl rounded-tr-sm px-4 py-3"
             : `bg-white border ${
                 message.error ? "border-red-200" : "border-gray-200"
-              } rounded-2xl rounded-tl-sm px-4 py-3`
+              } rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm`
         }`}
       >
         <div
@@ -1461,18 +1606,36 @@ function MessageBubble({ message }) {
           <div className="mt-2.5 pt-2 border-t border-gray-100">
             <p className="text-xs text-gray-400 font-medium mb-1.5">Sources</p>
             <div className="flex flex-wrap gap-1.5">
-              {message.sources.map((src, i) => (
-                <a
-                  key={i}
-                  href={src}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-xs text-blue-600 bg-blue-50 hover:bg-blue-100 px-2 py-0.5 rounded-md transition"
-                >
-                  <ExternalLink size={9} />
-                  {new URL(src).pathname.substring(0, 30) || "/"}
-                </a>
-              ))}
+              {message.sources.map((src, i) => {
+                let label = src;
+                try {
+                  const u = new URL(src);
+                  label = u.pathname.substring(0, 30) || "/";
+                } catch {
+                  label = src.length > 30 ? src.substring(0, 30) + "…" : src;
+                }
+                const isLink = /^https?:\/\//.test(src);
+                return isLink ? (
+                  <a
+                    key={i}
+                    href={src}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-xs text-blue-600 bg-blue-50 hover:bg-blue-100 px-2 py-0.5 rounded-md transition"
+                  >
+                    <ExternalLink size={9} />
+                    {label}
+                  </a>
+                ) : (
+                  <span
+                    key={i}
+                    className="inline-flex items-center gap-1 text-xs text-gray-600 bg-gray-100 px-2 py-0.5 rounded-md"
+                  >
+                    <FileText size={9} />
+                    {label}
+                  </span>
+                );
+              })}
             </div>
           </div>
         )}
@@ -1487,9 +1650,9 @@ function MessageBubble({ message }) {
   );
 }
 
-// ─── Settings Section ────────────────────────────────────────────────────────
+// ─── Project Settings: General ───────────────────────────────────────────────
 
-function SettingsSection({
+function PSGeneral({
   projectName,
   statusData,
   editingName,
@@ -1498,38 +1661,27 @@ function SettingsSection({
   setNewName,
   savingName,
   handleSaveName,
-  apiKeyInput,
-  setApiKeyInput,
-  savingKey,
-  handleSaveApiKey,
-  handleReCrawl,
-  handleReChunk,
-  handleReEmbed,
   setConfirmAction,
-  selectedModel,
-  savingModel,
-  handleSaveModel,
 }) {
   return (
     <div className="flex-1 overflow-y-auto p-6">
       <div className="space-y-6">
         <div>
-          <h2 className="text-xl font-bold text-charcoal">Project Settings</h2>
+          <h2 className="text-xl font-bold text-charcoal">General</h2>
           <p className="text-sm text-gray-500 mt-1">
-            Manage your project configuration, API keys, and data operations.
+            Manage your project name, website URL, and data.
           </p>
         </div>
 
-        {/* ─── General Settings ─── */}
+        {/* Project Name */}
         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-100 bg-gray-50/50">
             <h3 className="text-sm font-semibold text-charcoal flex items-center gap-2">
               <Edit3 size={15} />
-              General
+              Project Details
             </h3>
           </div>
           <div className="p-6 space-y-4">
-            {/* Project Name */}
             <div>
               <label className="text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Project Name
@@ -1581,43 +1733,254 @@ function SettingsSection({
               )}
             </div>
 
-            {/* Website URL (display only) */}
             <div>
               <label className="text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Website URL
+                Website URLs
               </label>
-              <p className="text-sm text-gray-600 mt-2">
-                {statusData?.website_url || (
-                  <span className="text-gray-400 italic">Not configured</span>
+              <div className="mt-2">
+                {statusData?.website_urls && statusData.website_urls.length > 0 ? (
+                  <div className="space-y-1">
+                    {statusData.website_urls.map((url, i) => (
+                      <p key={i} className="text-sm text-gray-600">{url}</p>
+                    ))}
+                  </div>
+                ) : statusData?.website_url ? (
+                  <p className="text-sm text-gray-600">{statusData.website_url}</p>
+                ) : (
+                  <p className="text-sm text-gray-400 italic">Not configured</p>
                 )}
-              </p>
-            </div>
-
-            {/* Status */}
-            <div>
-              <label className="text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Setup Progress
-              </label>
-              <div className="flex items-center gap-3 mt-2">
-                <span className="text-sm text-gray-600">
-                  Step {statusData?.setup_step || 0} / 4
-                </span>
-                <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-crimson rounded-full transition-all"
-                    style={{
-                      width: `${
-                        ((statusData?.setup_step || 0) / 4) * 100
-                      }%`,
-                    }}
-                  />
-                </div>
               </div>
             </div>
           </div>
         </div>
 
-        {/* ─── API Key ─── */}
+        {/* Danger Zone */}
+        <div className="bg-white border border-red-200 rounded-xl overflow-hidden">
+          <div className="px-6 py-4 border-b border-red-100 bg-red-50/50">
+            <h3 className="text-sm font-semibold text-red-700 flex items-center gap-2">
+              <AlertTriangle size={15} />
+              Danger Zone
+            </h3>
+          </div>
+          <div className="p-6 space-y-4">
+            <div className="flex items-center justify-between py-3 border-b border-gray-100">
+              <div>
+                <p className="text-sm font-medium text-charcoal">
+                  Delete All Data
+                </p>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Remove all documents, chunks, embeddings, and conversations.
+                  The project will be reset.
+                </p>
+              </div>
+              <button
+                onClick={() => setConfirmAction("delete-data")}
+                className="px-4 py-2 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition cursor-pointer shrink-0 flex items-center gap-1.5"
+              >
+                <Trash2 size={12} />
+                Delete Data
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between py-3">
+              <div>
+                <p className="text-sm font-medium text-charcoal">
+                  Delete Project
+                </p>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Permanently delete this project and all associated data. This
+                  action cannot be undone.
+                </p>
+              </div>
+              <button
+                onClick={() => setConfirmAction("delete-project")}
+                className="px-4 py-2 text-xs font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition cursor-pointer shrink-0 flex items-center gap-1.5"
+              >
+                <Trash2 size={12} />
+                Delete Project
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="h-8" />
+      </div>
+    </div>
+  );
+}
+
+// ─── Project Settings: LLM Models ────────────────────────────────────────────
+
+function PSLlmModels({ selectedModel, savingModel, handleSaveModel }) {
+  return (
+    <div className="flex-1 overflow-y-auto p-6">
+      <div className="space-y-6">
+        <div>
+          <h2 className="text-xl font-bold text-charcoal">LLM Models</h2>
+          <p className="text-sm text-gray-500 mt-1">
+            Select the AI model powering your chatbot responses. Each model has
+            different rate limits managed by Google.
+          </p>
+        </div>
+
+        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          <div className="px-6 py-4 border-b border-gray-100 bg-gray-50/50">
+            <h3 className="text-sm font-semibold text-charcoal flex items-center gap-2">
+              <Cpu size={15} />
+              Choose Model
+            </h3>
+          </div>
+          <div className="p-6">
+            <p className="text-xs text-gray-500 mb-5">
+              Max input tokens per request is automatically calculated as TPM
+              ÷ RPM. This determines how much context your chatbot can
+              process per question.
+            </p>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {[
+                {
+                  id: "gemini-2.5-flash",
+                  name: "Gemini 2.5 Flash",
+                  desc: "Best overall — fast, smart, high limits",
+                  rpm: 5,
+                  tpm: 250000,
+                  rpd: 20,
+                },
+                {
+                  id: "gemini-2.0-flash",
+                  name: "Gemini 2.0 Flash",
+                  desc: "Previous gen — same limits, slightly faster",
+                  rpm: 5,
+                  tpm: 250000,
+                  rpd: 20,
+                },
+                {
+                  id: "gemma-3-12b-it",
+                  name: "Gemma 3 12B",
+                  desc: "Open model — high RPM, lower token budget",
+                  rpm: 30,
+                  tpm: 15000,
+                  rpd: 14400,
+                },
+                {
+                  id: "gemma-3-27b-it",
+                  name: "Gemma 3 27B",
+                  desc: "Larger open model — higher quality, same limits",
+                  rpm: 30,
+                  tpm: 15000,
+                  rpd: 14400,
+                },
+              ].map((m) => {
+                const isSelected = selectedModel === m.id;
+                const maxInput = Math.floor(m.tpm / m.rpm);
+                return (
+                  <button
+                    key={m.id}
+                    onClick={() => !isSelected && handleSaveModel(m.id)}
+                    disabled={savingModel}
+                    className={`text-left p-5 border rounded-xl transition-all cursor-pointer disabled:opacity-60 ${
+                      isSelected
+                        ? "border-crimson bg-crimson/5 ring-1 ring-crimson/20"
+                        : "border-gray-200 hover:border-crimson/30 hover:bg-gray-50"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-sm font-semibold text-charcoal">
+                        {m.name}
+                      </span>
+                      {isSelected && (
+                        <span className="text-xs font-medium text-crimson bg-crimson/10 px-2 py-0.5 rounded-full">
+                          Active
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-500 mb-3">{m.desc}</p>
+                    <div className="grid grid-cols-4 gap-2 text-center">
+                      <div className="bg-gray-50 rounded-md px-2 py-1.5">
+                        <p className="text-xs font-bold text-charcoal">
+                          {m.rpm}
+                        </p>
+                        <p className="text-[10px] text-gray-400">RPM</p>
+                      </div>
+                      <div className="bg-gray-50 rounded-md px-2 py-1.5">
+                        <p className="text-xs font-bold text-charcoal">
+                          {(m.tpm / 1000).toFixed(0)}K
+                        </p>
+                        <p className="text-[10px] text-gray-400">TPM</p>
+                      </div>
+                      <div className="bg-gray-50 rounded-md px-2 py-1.5">
+                        <p className="text-xs font-bold text-charcoal">
+                          {m.rpd >= 1000
+                            ? `${(m.rpd / 1000).toFixed(1)}K`
+                            : m.rpd}
+                        </p>
+                        <p className="text-[10px] text-gray-400">RPD</p>
+                      </div>
+                      <div className="bg-gray-50 rounded-md px-2 py-1.5">
+                        <p className="text-xs font-bold text-charcoal">
+                          {(maxInput / 1000).toFixed(0)}K
+                        </p>
+                        <p className="text-[10px] text-gray-400">Max In</p>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="mt-5 flex items-center justify-between">
+              <p className="text-xs text-gray-400">
+                Rate limits are managed by Google.{" "}
+                <a
+                  href="https://aistudio.google.com/app/rate-limit"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-500 hover:underline"
+                >
+                  View your limits
+                </a>
+              </p>
+              {savingModel && (
+                <div className="flex items-center gap-1.5 text-xs text-gray-500">
+                  <Loader2 size={12} className="animate-spin" />
+                  Saving...
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="h-8" />
+      </div>
+    </div>
+  );
+}
+
+// ─── Project Settings: Re-Integration ────────────────────────────────────────
+
+function PSReIntegration({
+  statusData,
+  apiKeyInput,
+  setApiKeyInput,
+  savingKey,
+  handleSaveApiKey,
+  handleReCrawl,
+  handleReEmbed,
+  handleReEmbedAll,
+}) {
+  return (
+    <div className="flex-1 overflow-y-auto p-6">
+      <div className="space-y-6">
+        <div>
+          <h2 className="text-xl font-bold text-charcoal">Re-Integration</h2>
+          <p className="text-sm text-gray-500 mt-1">
+            Update your API key or re-run pipeline stages to refresh your
+            chatbot's knowledge.
+          </p>
+        </div>
+
+        {/* API Key */}
         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-100 bg-gray-50/50">
             <h3 className="text-sm font-semibold text-charcoal flex items-center gap-2">
@@ -1672,130 +2035,21 @@ function SettingsSection({
           </div>
         </div>
 
-        {/* ─── LLM Models ─── */}
-        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-100 bg-gray-50/50">
-            <h3 className="text-sm font-semibold text-charcoal flex items-center gap-2">
-              <Cpu size={15} />
-              LLM Model
-            </h3>
-          </div>
-          <div className="p-6">
-            <p className="text-xs text-gray-500 mb-4">
-              Select the AI model for your chatbot responses. Each model has different rate limits.
-              Max input tokens per request is calculated as TPM ÷ RPM.
-            </p>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {[
-                {
-                  id: "gemini-2.5-flash",
-                  name: "Gemini 2.5 Flash",
-                  desc: "Best overall — fast, smart, high limits",
-                  rpm: 5, tpm: 250000, rpd: 20,
-                },
-                {
-                  id: "gemini-2.0-flash",
-                  name: "Gemini 2.0 Flash",
-                  desc: "Previous gen — same limits, slightly faster",
-                  rpm: 5, tpm: 250000, rpd: 20,
-                },
-                {
-                  id: "gemma-3-12b-it",
-                  name: "Gemma 3 12B",
-                  desc: "Open model — high RPM, lower token budget",
-                  rpm: 30, tpm: 15000, rpd: 14400,
-                },
-                {
-                  id: "gemma-3-27b-it",
-                  name: "Gemma 3 27B",
-                  desc: "Larger open model — higher quality, same limits",
-                  rpm: 30, tpm: 15000, rpd: 14400,
-                },
-              ].map((m) => {
-                const isSelected = selectedModel === m.id;
-                const maxInput = Math.floor(m.tpm / m.rpm);
-                return (
-                  <button
-                    key={m.id}
-                    onClick={() => !isSelected && handleSaveModel(m.id)}
-                    disabled={savingModel}
-                    className={`text-left p-4 border rounded-xl transition-all cursor-pointer disabled:opacity-60 ${
-                      isSelected
-                        ? "border-crimson bg-crimson/5 ring-1 ring-crimson/20"
-                        : "border-gray-200 hover:border-crimson/30 hover:bg-gray-50"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-sm font-semibold text-charcoal">{m.name}</span>
-                      {isSelected && (
-                        <span className="text-xs font-medium text-crimson bg-crimson/10 px-2 py-0.5 rounded-full">
-                          Active
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-gray-500 mb-3">{m.desc}</p>
-                    <div className="grid grid-cols-4 gap-2 text-center">
-                      <div className="bg-gray-50 rounded-md px-2 py-1.5">
-                        <p className="text-xs font-bold text-charcoal">{m.rpm}</p>
-                        <p className="text-[10px] text-gray-400">RPM</p>
-                      </div>
-                      <div className="bg-gray-50 rounded-md px-2 py-1.5">
-                        <p className="text-xs font-bold text-charcoal">{(m.tpm / 1000).toFixed(0)}K</p>
-                        <p className="text-[10px] text-gray-400">TPM</p>
-                      </div>
-                      <div className="bg-gray-50 rounded-md px-2 py-1.5">
-                        <p className="text-xs font-bold text-charcoal">{m.rpd >= 1000 ? `${(m.rpd / 1000).toFixed(1)}K` : m.rpd}</p>
-                        <p className="text-[10px] text-gray-400">RPD</p>
-                      </div>
-                      <div className="bg-gray-50 rounded-md px-2 py-1.5">
-                        <p className="text-xs font-bold text-charcoal">{(maxInput / 1000).toFixed(0)}K</p>
-                        <p className="text-[10px] text-gray-400">Max In</p>
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="mt-4 flex items-center justify-between">
-              <p className="text-xs text-gray-400">
-                Rate limits are managed by Google.{" "}
-                <a
-                  href="https://aistudio.google.com/app/rate-limit"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-blue-500 hover:underline"
-                >
-                  View your limits →
-                </a>
-              </p>
-              {savingModel && (
-                <div className="flex items-center gap-1.5 text-xs text-gray-500">
-                  <Loader2 size={12} className="animate-spin" />
-                  Saving...
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* ─── Data Operations ─── */}
+        {/* Data Operations */}
         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-100 bg-gray-50/50">
             <h3 className="text-sm font-semibold text-charcoal flex items-center gap-2">
               <RefreshCw size={15} />
-              Data Operations
+              Data Pipeline
             </h3>
           </div>
           <div className="p-6 space-y-4">
             <p className="text-xs text-gray-500">
-              Re-run pipeline stages. Each stage depends on the previous one:
-              Crawl → Chunk → Embed.
+              Re-run pipeline stages to refresh your chatbot's knowledge: Crawl
+              → Embed.
             </p>
 
             <div className="grid grid-cols-3 gap-4">
-              {/* Re-crawl */}
               <div className="border border-gray-200 rounded-lg p-4">
                 <div className="flex items-center gap-2 mb-2">
                   <Globe size={16} className="text-blue-600" />
@@ -1808,7 +2062,7 @@ function SettingsSection({
                 </p>
                 <button
                   onClick={handleReCrawl}
-                  disabled={!statusData?.website_url}
+                  disabled={!statusData?.website_urls?.length && !statusData?.website_url}
                   className="w-full px-3 py-2 text-xs font-medium text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
                 >
                   <RotateCcw size={12} />
@@ -1816,103 +2070,60 @@ function SettingsSection({
                 </button>
               </div>
 
-              {/* Re-chunk */}
-              <div className="border border-gray-200 rounded-lg p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <Layers size={16} className="text-purple-600" />
-                  <h4 className="text-sm font-medium text-charcoal">
-                    Re-Chunk
-                  </h4>
-                </div>
-                <p className="text-xs text-gray-500 mb-3">
-                  Regenerate chunks from existing documents.
-                </p>
-                <button
-                  onClick={handleReChunk}
-                  disabled={!statusData?.document_count}
-                  className="w-full px-3 py-2 text-xs font-medium text-purple-600 border border-purple-200 rounded-lg hover:bg-purple-50 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
-                >
-                  <RotateCcw size={12} />
-                  Re-Generate Chunks
-                </button>
-              </div>
-
-              {/* Re-embed */}
               <div className="border border-gray-200 rounded-lg p-4">
                 <div className="flex items-center gap-2 mb-2">
                   <Sparkles size={16} className="text-emerald-600" />
                   <h4 className="text-sm font-medium text-charcoal">
-                    Re-Embed
+                    Embed Pending
                   </h4>
                 </div>
                 <p className="text-xs text-gray-500 mb-3">
-                  Re-generate embeddings for all chunks.
+                  Embed only chunks that don't have embeddings yet.
+                  {statusData?.pending_chunks > 0 && (
+                    <span className="text-emerald-600 font-medium">
+                      {" "}
+                      {statusData.pending_chunks} pending.
+                    </span>
+                  )}
                 </p>
                 <button
                   onClick={handleReEmbed}
-                  disabled={!statusData?.chunk_count || !statusData?.has_api_key}
+                  disabled={
+                    !(statusData?.pending_chunks > 0) ||
+                    !statusData?.has_api_key
+                  }
                   className="w-full px-3 py-2 text-xs font-medium text-emerald-600 border border-emerald-200 rounded-lg hover:bg-emerald-50 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
                 >
+                  <Sparkles size={12} />
+                  Embed Pending Data
+                </button>
+              </div>
+
+              <div className="border border-amber-200 rounded-lg p-4 bg-amber-50/30">
+                <div className="flex items-center gap-2 mb-2">
+                  <RotateCcw size={16} className="text-amber-600" />
+                  <h4 className="text-sm font-medium text-charcoal">
+                    Re-Embed All
+                  </h4>
+                </div>
+                <p className="text-xs text-gray-500 mb-3">
+                  Clear all embeddings and re-generate from scratch.
+                </p>
+                <button
+                  onClick={handleReEmbedAll}
+                  disabled={
+                    !statusData?.chunk_count || !statusData?.has_api_key
+                  }
+                  className="w-full px-3 py-2 text-xs font-medium text-amber-600 border border-amber-300 rounded-lg hover:bg-amber-100 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                >
                   <RotateCcw size={12} />
-                  Re-Embed Data
+                  Re-Embed All Data
                 </button>
               </div>
             </div>
           </div>
         </div>
 
-        {/* ─── Danger Zone ─── */}
-        <div className="bg-white border border-red-200 rounded-xl overflow-hidden">
-          <div className="px-6 py-4 border-b border-red-100 bg-red-50/50">
-            <h3 className="text-sm font-semibold text-red-700 flex items-center gap-2">
-              <AlertTriangle size={15} />
-              Danger Zone
-            </h3>
-          </div>
-          <div className="p-6 space-y-4">
-            {/* Delete All Data */}
-            <div className="flex items-center justify-between py-3 border-b border-gray-100">
-              <div>
-                <p className="text-sm font-medium text-charcoal">
-                  Delete All Data
-                </p>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  Remove all documents, chunks, embeddings, and conversations.
-                  The project will be reset to step 0.
-                </p>
-              </div>
-              <button
-                onClick={() => setConfirmAction("delete-data")}
-                className="px-4 py-2 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition cursor-pointer shrink-0 flex items-center gap-1.5"
-              >
-                <Trash2 size={12} />
-                Delete Data
-              </button>
-            </div>
-
-            {/* Delete Project */}
-            <div className="flex items-center justify-between py-3">
-              <div>
-                <p className="text-sm font-medium text-charcoal">
-                  Delete Project
-                </p>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  Permanently delete this project and all associated data. This
-                  action cannot be undone.
-                </p>
-              </div>
-              <button
-                onClick={() => setConfirmAction("delete-project")}
-                className="px-4 py-2 text-xs font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition cursor-pointer shrink-0 flex items-center gap-1.5"
-              >
-                <Trash2 size={12} />
-                Delete Project
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* spacer at bottom */}
         <div className="h-8" />
       </div>
     </div>

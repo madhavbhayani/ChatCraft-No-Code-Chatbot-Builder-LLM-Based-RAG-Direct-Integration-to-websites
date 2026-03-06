@@ -11,6 +11,7 @@ type Project struct {
 	Description           string    `json:"description"`
 	Status                string    `json:"status"` // draft | active | paused
 	WebsiteURL            string    `json:"website_url,omitempty"`
+	WebsiteURLs           []string  `json:"website_urls,omitempty"`
 	GeminiAPIKeyEncrypted string    `json:"-"` // never expose
 	BotName               string    `json:"bot_name,omitempty"`
 	SystemPrompt          string    `json:"system_prompt,omitempty"`
