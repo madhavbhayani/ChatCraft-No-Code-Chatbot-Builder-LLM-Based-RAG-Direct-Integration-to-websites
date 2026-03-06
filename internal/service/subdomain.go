@@ -18,8 +18,8 @@ type SubdomainResult struct {
 	Subdomain    string `json:"subdomain"`
 	FullURL      string `json:"full_url"`
 	IsLive       bool   `json:"is_live"`
-	Priority     string `json:"priority"`      // "high", "medium", "low"
-	Category     string `json:"category"`       // "docs", "help", "blog", "api", "cdn", etc.
+	Priority     string `json:"priority"` // "high", "medium", "low"
+	Category     string `json:"category"` // "docs", "help", "blog", "api", "cdn", etc.
 	Recommended  bool   `json:"recommended"`
 	AutoSelected bool   `json:"auto_selected"`
 }
@@ -80,9 +80,7 @@ func DiscoverSubdomains(domain string) (*DiscoverSubdomainsResult, error) {
 	domain = strings.ToLower(domain)
 
 	// Strip www. prefix if present to get root domain
-	if strings.HasPrefix(domain, "www.") {
-		domain = domain[4:]
-	}
+	domain = strings.TrimPrefix(domain, "www.")
 
 	log.Printf("[subdomain] Discovering subdomains for: %s", domain)
 

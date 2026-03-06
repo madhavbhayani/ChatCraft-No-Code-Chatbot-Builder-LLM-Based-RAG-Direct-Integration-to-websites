@@ -30,9 +30,8 @@ const API = "/api/v1";
 
 const STEPS = [
   { id: 1, title: "API Key", desc: "Add your Gemini API key for embeddings", icon: Key },
-  { id: 2, title: "Crawl Website", desc: "Provide your website URL to extract content", icon: Globe },
-  { id: 3, title: "Chunk & Upload", desc: "Break content into pieces & add custom data", icon: FileText },
-  { id: 4, title: "Generate Embeddings", desc: "Convert text chunks into vector embeddings", icon: Zap },
+  { id: 2, title: "Crawl & Upload", desc: "Crawl your website and upload additional data", icon: Globe },
+  { id: 3, title: "Generate Embeddings", desc: "Convert text chunks into vector embeddings", icon: Zap },
 ];
 
 export default function IntegratePage() {
@@ -57,19 +56,17 @@ export default function IntegratePage() {
   const [selectedSubdomains, setSelectedSubdomains] = useState(new Set());
   const [showLowPriority, setShowLowPriority] = useState(false);
 
-  // Step 2 state
-  const [chunking, setChunking] = useState(false);
-  const [chunkStats, setChunkStats] = useState(null);
+  // Step 2 state (upload)
   const [uploading, setUploading] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState([]);
   const fileInputRef = useRef(null);
 
-  // Step 3 state
+  // Step 1 state (API Key)
   const [apiKey, setApiKey] = useState("");
   const [savingKey, setSavingKey] = useState(false);
   const [keyValidated, setKeyValidated] = useState(false);
 
-  // Step 4 state
+  // Step 3 state (Embed)
   const [embedding, setEmbedding] = useState(false);
   const [embedStats, setEmbedStats] = useState(null);
   const [embedJobId, setEmbedJobId] = useState(null);
@@ -103,7 +100,6 @@ export default function IntegratePage() {
         if (data.setup_step >= 1) done.add(1);
         if (data.setup_step >= 2) done.add(2);
         if (data.setup_step >= 3) done.add(3);
-        if (data.setup_step >= 4) done.add(4);
         setCompletedSteps(done);
 
         if (data.has_api_key) setKeyValidated(true);
@@ -113,16 +109,16 @@ export default function IntegratePage() {
           setWebsiteUrl(data.website_url);
         }
 
-        // Set current step to next incomplete (or step 4 if pending chunks exist)
-        if (data.setup_step < 4) {
+        // Set current step to next incomplete (or step 3 if pending chunks exist)
+        if (data.setup_step < 3) {
           const pendingCount = data.pending_chunks ?? (data.chunk_count - data.embedded_count);
-          if (data.setup_step >= 3 && pendingCount > 0) {
-            setCurrentStep(4);
+          if (data.setup_step >= 2 && pendingCount > 0) {
+            setCurrentStep(3);
           } else {
             setCurrentStep(data.setup_step + 1);
           }
         } else {
-          setCurrentStep(4);
+          setCurrentStep(3);
         }
 
         // Populate documents list for crawled pages display
@@ -138,9 +134,6 @@ export default function IntegratePage() {
           );
         }
 
-        if (data.chunk_count > 0) {
-          setChunkStats({ total_chunks: data.chunk_count });
-        }
         // Only show "complete" state if ALL chunks are embedded (no pending)
         const pending = data.pending_chunks ?? (data.chunk_count - data.embedded_count);
         if (data.embedded_count > 0 && pending === 0) {
@@ -159,7 +152,7 @@ export default function IntegratePage() {
         if (data.active_embed_job_id) {
           setEmbedJobId(data.active_embed_job_id);
           setEmbedding(true);
-          setCurrentStep(4);
+          setCurrentStep(3);
         }
       }
     } catch (err) {
@@ -373,26 +366,7 @@ export default function IntegratePage() {
     }
   };
 
-  // ---------- Step 2: Chunk + Upload ----------
-  const handleChunk = async () => {
-    setChunking(true);
-    try {
-      const res = await fetch(`${API}/console/chunk/${projectId}`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${getToken()}` },
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Chunking failed");
-
-      setChunkStats(data);
-      setCompletedSteps((prev) => new Set([...prev, 3]));
-      toast.success(data.message);
-    } catch (err) {
-      toast.error(err.message);
-    } finally {
-      setChunking(false);
-    }
-  };
+  // ---------- Step 2: Upload ----------
 
   const handleFileUpload = async (e) => {
     const file = e.target.files?.[0];
@@ -492,7 +466,7 @@ export default function IntegratePage() {
           stopEmbedPolling();
           setEmbedding(false);
           setEmbedStats({ embedded: data.embedded, total: data.total_chunks });
-          setCompletedSteps((prev) => new Set([...prev, 4]));
+          setCompletedSteps((prev) => new Set([...prev, 3]));
           toast.success(`Embeddings complete: ${data.embedded} chunks embedded`);
         } else if (data.status === "failed") {
           stopEmbedPolling();
@@ -512,7 +486,7 @@ export default function IntegratePage() {
     }
   }, [embedJobId, embedding, startEmbedPolling]);
 
-  // ---------- Step 4: Embed ----------
+  // ---------- Step 3: Embed ----------
   const handleEmbed = async () => {
     setEmbedding(true);
     setEmbedProgress(null);
@@ -532,7 +506,7 @@ export default function IntegratePage() {
       } else {
         // No chunks to embed response
         setEmbedStats(data);
-        setCompletedSteps((prev) => new Set([...prev, 4]));
+        setCompletedSteps((prev) => new Set([...prev, 3]));
         toast.success(data.message);
         setEmbedding(false);
       }
@@ -560,7 +534,7 @@ export default function IntegratePage() {
         startEmbedPolling(data.job_id);
       } else {
         setEmbedStats(data);
-        setCompletedSteps((prev) => new Set([...prev, 4]));
+        setCompletedSteps((prev) => new Set([...prev, 3]));
         toast.success(data.message);
         setEmbedding(false);
       }
@@ -982,6 +956,7 @@ export default function IntegratePage() {
                           {crawlProgress.current_phase === "crawling" && "Crawling website pages..."}
                           {crawlProgress.current_phase === "comparing" && "Comparing with existing data..."}
                           {crawlProgress.current_phase === "processing" && "Processing & storing pages..."}
+                          {crawlProgress.current_phase === "chunking" && "Auto-chunking pages into smaller pieces..."}
                           {crawlProgress.current_phase === "failed" && "Crawl failed"}
                           {(!crawlProgress.current_phase || crawlProgress.current_phase === "") && "Starting crawl..."}
                         </p>
@@ -1067,13 +1042,6 @@ export default function IntegratePage() {
                         </div>
                       </details>
                     )}
-                    <button
-                      onClick={() => setCurrentStep(3)}
-                      className="flex items-center gap-2 bg-crimson text-white px-6 py-2.5 rounded-lg font-semibold text-sm
-                                 hover:bg-rose-pink transition-all duration-200 cursor-pointer shadow-sm"
-                    >
-                      Proceed to Step 3
-                    </button>
                   </div>
                 )}
 
@@ -1159,59 +1127,12 @@ export default function IntegratePage() {
                     </button>
                   </div>
                 )}
-              </div>
-            </StepCard>
-          )}
-
-          {/* ========== STEP 3: Chunk & Upload ========== */}
-          {currentStep === 3 && (
-            <StepCard
-              step={3}
-              title="Chunk Documents & Upload Data"
-              subtitle="Break crawled content into smaller pieces for better AI understanding. You can also upload additional files."
-            >
-              <div className="space-y-6">
-                {/* Chunk Section */}
-                <div className="p-5 rounded-xl border border-light-rose bg-white">
-                  <h4 className="text-sm font-bold text-charcoal mb-2">Auto-Chunking</h4>
-                  <p className="text-xs text-muted mb-4">
-                    Your crawled pages will be split into ~400-word chunks with overlapping context.
-                    This ensures the AI can find the most relevant information for any question.
-                  </p>
-
-                  {chunkStats ? (
-                    <div className="flex items-center gap-2 text-success text-sm font-medium">
-                      <CheckCircle2 size={16} />
-                      {chunkStats.total_chunks} chunks created
-                    </div>
-                  ) : (
-                    <button
-                      onClick={handleChunk}
-                      disabled={chunking}
-                      className="flex items-center gap-2 bg-charcoal text-white px-5 py-2 rounded-lg font-semibold text-sm
-                                 hover:bg-charcoal/80 transition-all duration-200 cursor-pointer disabled:opacity-50"
-                    >
-                      {chunking ? (
-                        <>
-                          <Loader2 size={16} className="animate-spin" />
-                          Chunking...
-                        </>
-                      ) : (
-                        <>
-                          <FileText size={16} />
-                          Chunk All Documents
-                        </>
-                      )}
-                    </button>
-                  )}
-                </div>
-
-                {/* Upload Section */}
+                {/* Upload Additional Files Section */}
                 <div className="p-5 rounded-xl border border-light-rose bg-white">
                   <h4 className="text-sm font-bold text-charcoal mb-2">Upload Additional Files</h4>
                   <p className="text-xs text-muted mb-4">
-                    Upload custom data files to enrich your chatbot's knowledge. Supported formats:
-                    <span className="font-semibold"> .txt, .md, .csv, .html</span> (max 3MB each)
+                    Upload custom data files to enrich your chatbot's knowledge. Files are automatically chunked for best results.
+                    Supported formats: <span className="font-semibold">.txt, .md, .csv, .html</span> (max 3MB each)
                   </p>
 
                   <div className="flex items-center gap-3">
@@ -1261,34 +1182,24 @@ export default function IntegratePage() {
                   )}
                 </div>
 
-                {/* Info about re-chunking uploaded files */}
-                {uploadedFiles.length > 0 && !chunkStats && (
-                  <div className="flex items-start gap-2 p-3 rounded-lg bg-warning/10 border border-warning/30 text-sm">
-                    <AlertCircle size={16} className="text-warning shrink-0 mt-0.5" />
-                    <p className="text-charcoal/80">
-                      You uploaded new files. Click <strong>Chunk All Documents</strong> again to include them.
-                    </p>
-                  </div>
-                )}
-
-                {/* Proceed */}
-                {chunkStats && (
+                {/* Proceed to Embed */}
+                {(completedSteps.has(2) || crawledPages.length > 0 || uploadedFiles.length > 0) && !crawling && (
                   <button
-                    onClick={() => setCurrentStep(4)}
+                    onClick={() => setCurrentStep(3)}
                     className="flex items-center gap-2 bg-crimson text-white px-6 py-2.5 rounded-lg font-semibold text-sm
                                hover:bg-rose-pink transition-all duration-200 cursor-pointer shadow-sm"
                   >
-                    Proceed to Step 4
+                    Proceed to Step 3
                   </button>
                 )}
               </div>
             </StepCard>
           )}
 
-          {/* ========== STEP 4: Embed ========== */}
-          {currentStep === 4 && (
+          {/* ========== STEP 3: Embed ========== */}
+          {currentStep === 3 && (
             <StepCard
-              step={4}
+              step={3}
               title="Generate Embeddings"
               subtitle="Convert all text chunks into 768-dimensional vectors using Gemini Embedding API. This powers semantic search."
             >

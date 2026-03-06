@@ -422,7 +422,50 @@ func (h *BotBuilderHandler) runCrawlJob(jobID, projectID string, crawlURLs []str
 		}
 	}
 
-	// Update setup_step to 2 (crawl done — user must chunk manually in Step 3)
+	// --- AUTO-CHUNK all pending documents ---
+	prog.Phase = "chunking"
+	prog.addLog("Auto-chunking crawled pages into ~400-word chunks...")
+	h.writeCrawlProgress(jobID, prog, true)
+
+	chunkRows, chunkErr := h.DB.Pool.Query(ctx,
+		"SELECT id, title, raw_content FROM documents WHERE project_id = $1 AND status = 'pending'", projectID,
+	)
+	totalChunksCreated := 0
+	if chunkErr != nil {
+		log.Printf("[crawl-job] ERROR fetching docs for chunking: %v", chunkErr)
+		prog.addLog("⚠ Failed to fetch documents for chunking")
+	} else {
+		for chunkRows.Next() {
+			var docID, title, content string
+			if chunkRows.Scan(&docID, &title, &content) != nil {
+				continue
+			}
+			// Delete existing chunks for this document (re-crawl scenario)
+			_, _ = h.DB.Pool.Exec(ctx, "DELETE FROM chunks WHERE document_id = $1", docID)
+
+			chunks := service.SmartChunkText(title, content, 400, 50)
+			for _, chunk := range chunks {
+				chunkID := uuid.New().String()
+				_, err := h.DB.Pool.Exec(ctx,
+					`INSERT INTO chunks (id, document_id, project_id, chunk_index, content, created_at)
+					 VALUES ($1, $2, $3, $4, $5, NOW())`,
+					chunkID, docID, projectID, chunk.Index, chunk.Content,
+				)
+				if err != nil {
+					log.Printf("[crawl-chunk] insert error: %v", err)
+					continue
+				}
+				totalChunksCreated++
+			}
+			_, _ = h.DB.Pool.Exec(ctx, "UPDATE documents SET status = 'chunked' WHERE id = $1", docID)
+		}
+		chunkRows.Close()
+	}
+	log.Printf("[crawl-job] Auto-chunked: %d chunks created", totalChunksCreated)
+	prog.addLog(fmt.Sprintf("✓ Created %d chunks from crawled pages", totalChunksCreated))
+	h.writeCrawlProgress(jobID, prog, true)
+
+	// Update setup_step to 2 (crawl + chunk done — user proceeds to embed)
 	_, err = h.DB.Pool.Exec(ctx,
 		"UPDATE projects SET setup_step = GREATEST(setup_step, 2), updated_at = NOW() WHERE id = $1",
 		projectID,
@@ -435,16 +478,16 @@ func (h *BotBuilderHandler) runCrawlJob(jobID, projectID string, crawlURLs []str
 
 	// --- FINAL ---
 	prog.Phase = "done"
-	prog.addLog(fmt.Sprintf("All done! %d new/updated, %d unchanged. Ready for chunking.",
-		crawledCount, skippedCount))
+	prog.addLog(fmt.Sprintf("All done! %d new/updated, %d unchanged, %d chunks created. Ready for embedding.",
+		crawledCount, skippedCount, totalChunksCreated))
 	h.writeCrawlProgress(jobID, prog, true) // force final write
 
 	now := time.Now()
 	_, err = h.DB.Pool.Exec(ctx,
 		`UPDATE crawl_jobs SET status = 'done', crawled_urls = $1, skipped_urls = $2,
-		 total_urls = $3, chunks_created = 0, finished_at = $4, current_phase = 'done'
-		 WHERE id = $5`,
-		crawledCount, skippedCount, totalDiscovered, now, jobID,
+		 total_urls = $3, chunks_created = $4, finished_at = $5, current_phase = 'done'
+		 WHERE id = $6`,
+		crawledCount, skippedCount, totalDiscovered, totalChunksCreated, now, jobID,
 	)
 	if err != nil {
 		log.Printf("[crawl-job] ERROR marking job done: %v", err)
@@ -452,8 +495,8 @@ func (h *BotBuilderHandler) runCrawlJob(jobID, projectID string, crawlURLs []str
 		log.Printf("[DB] UPDATE crawl_jobs SET status='done' WHERE id = %s", jobID)
 	}
 
-	log.Printf("[crawl-job] %s COMPLETE: %d crawled, %d skipped",
-		jobID, crawledCount, skippedCount)
+	log.Printf("[crawl-job] %s COMPLETE: %d crawled, %d skipped, %d chunks",
+		jobID, crawledCount, skippedCount, totalChunksCreated)
 }
 
 // GetCrawlJobStatus returns the current status of a crawl job.
@@ -584,11 +627,6 @@ func (h *BotBuilderHandler) ChunkDocuments(w http.ResponseWriter, r *http.Reques
 		)
 	}
 
-	// Update setup_step to at least 3
-	log.Printf("[DB] UPDATE projects SET setup_step = GREATEST(setup_step, 3) WHERE id = %s", projectID)
-	_, _ = h.DB.Pool.Exec(r.Context(),
-		"UPDATE projects SET setup_step = GREATEST(setup_step, 3), updated_at = NOW() WHERE id = $1", projectID,
-	)
 	log.Printf("[DB] OK ChunkDocuments complete: %d chunks created", totalChunks)
 
 	w.Header().Set("Content-Type", "application/json")
@@ -942,9 +980,9 @@ func (h *BotBuilderHandler) runEmbedJob(jobID, projectID, apiKey string) {
 		 WHERE project_id = $1 AND status = 'chunked'`, projectID,
 	)
 
-	// Update setup_step to 4 (complete)
+	// Update setup_step to 3 (complete)
 	h.DB.Pool.Exec(ctx,
-		"UPDATE projects SET setup_step = 4, status = 'active', updated_at = NOW() WHERE id = $1",
+		"UPDATE projects SET setup_step = 3, status = 'active', updated_at = NOW() WHERE id = $1",
 		projectID,
 	)
 
