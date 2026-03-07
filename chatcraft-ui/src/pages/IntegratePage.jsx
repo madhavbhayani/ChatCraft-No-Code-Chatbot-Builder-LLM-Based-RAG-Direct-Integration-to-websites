@@ -990,7 +990,7 @@ export default function IntegratePage() {
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                       <MiniStat label="Total URLs" value={crawlProgress.total_urls} />
                       <MiniStat label="New/Updated" value={crawlProgress.crawled_urls} color="text-success" />
-                      <MiniStat label="Unchanged" value={crawlProgress.skipped_urls} color="text-muted" />
+                      <MiniStat label="Skipped" value={crawlProgress.skipped_urls} color="text-muted" />
                       <MiniStat label="Chunks" value={crawlProgress.chunks_created} color="text-crimson" />
                     </div>
 

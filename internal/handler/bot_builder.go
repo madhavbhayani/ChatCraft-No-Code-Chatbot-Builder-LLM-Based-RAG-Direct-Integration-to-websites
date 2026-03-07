@@ -443,13 +443,13 @@ func (h *BotBuilderHandler) runCrawlJob(jobID, projectID string, crawlURLs []str
 			// Delete existing chunks for this document (re-crawl scenario)
 			_, _ = h.DB.Pool.Exec(ctx, "DELETE FROM chunks WHERE document_id = $1", docID)
 
-			chunks := service.SmartChunkText(title, content, 400, 50)
+			chunks := service.SmartChunkText(title, content, 300, 40)
 			for _, chunk := range chunks {
 				chunkID := uuid.New().String()
 				_, err := h.DB.Pool.Exec(ctx,
-					`INSERT INTO chunks (id, document_id, project_id, chunk_index, content, created_at)
-					 VALUES ($1, $2, $3, $4, $5, NOW())`,
-					chunkID, docID, projectID, chunk.Index, chunk.Content,
+					`INSERT INTO chunks (id, document_id, project_id, chunk_index, content, page_title, section_heading, chunk_type, word_count, created_at)
+					 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())`,
+					chunkID, docID, projectID, chunk.Index, chunk.Content, chunk.PageTitle, chunk.SectionHeading, chunk.Type, chunk.WordCount,
 				)
 				if err != nil {
 					log.Printf("[crawl-chunk] insert error: %v", err)
@@ -603,15 +603,15 @@ func (h *BotBuilderHandler) ChunkDocuments(w http.ResponseWriter, r *http.Reques
 		)
 
 		// Smart chunk: FAQ-aware, heading-aware, with title prefix
-		chunks := service.SmartChunkText(title, content, 400, 50)
+		chunks := service.SmartChunkText(title, content, 300, 40)
 
 		for _, chunk := range chunks {
 			chunkID := uuid.New().String()
 			log.Printf("[DB] INSERT INTO chunks (id=%s, doc=%s, idx=%d)", chunkID[:8], docID[:8], chunk.Index)
 			_, err := h.DB.Pool.Exec(r.Context(),
-				`INSERT INTO chunks (id, document_id, project_id, chunk_index, content, created_at)
-				 VALUES ($1, $2, $3, $4, $5, NOW())`,
-				chunkID, docID, projectID, chunk.Index, chunk.Content,
+				`INSERT INTO chunks (id, document_id, project_id, chunk_index, content, page_title, section_heading, chunk_type, word_count, created_at)
+				 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())`,
+				chunkID, docID, projectID, chunk.Index, chunk.Content, chunk.PageTitle, chunk.SectionHeading, chunk.Type, chunk.WordCount,
 			)
 			if err != nil {
 				log.Printf("[chunk] insert error: %v", err)
@@ -711,14 +711,14 @@ func (h *BotBuilderHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Auto-chunk the uploaded document so it's ready for embedding
-	chunks := service.SmartChunkText(header.Filename, textContent, 400, 50)
+	chunks := service.SmartChunkText(header.Filename, textContent, 300, 40)
 	totalChunks := 0
 	for _, chunk := range chunks {
 		chunkID := uuid.New().String()
 		_, err := h.DB.Pool.Exec(r.Context(),
-			`INSERT INTO chunks (id, document_id, project_id, chunk_index, content, created_at)
-			 VALUES ($1, $2, $3, $4, $5, NOW())`,
-			chunkID, docID, projectID, chunk.Index, chunk.Content,
+			`INSERT INTO chunks (id, document_id, project_id, chunk_index, content, page_title, section_heading, chunk_type, word_count, created_at)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())`,
+			chunkID, docID, projectID, chunk.Index, chunk.Content, chunk.PageTitle, chunk.SectionHeading, chunk.Type, chunk.WordCount,
 		)
 		if err != nil {
 			log.Printf("[upload-chunk] insert error: %v", err)
@@ -943,7 +943,7 @@ func (h *BotBuilderHandler) runEmbedJob(jobID, projectID, apiKey string) {
 	embedded := 0
 	failed := 0
 	for _, chunk := range pendingChunks {
-		embedding, err := service.EmbedText(ctx, apiKey, chunk.Content)
+		embedding, err := service.EmbedChunkForStorage(ctx, apiKey, chunk.Content)
 		if err != nil {
 			log.Printf("[embed-job] error for chunk %s: %v", chunk.ID, err)
 			failed++

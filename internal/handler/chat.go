@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"strings"
 
@@ -19,6 +20,17 @@ import (
 // ChatHandler handles public RAG chat requests from embedded widgets.
 type ChatHandler struct {
 	DB *database.DB
+}
+
+// searchResult holds a single RAG search result with metadata.
+type searchResult struct {
+	Content        string
+	SourceURL      string
+	Similarity     float64
+	PageTitle      string
+	SectionHeading string
+	ChunkType      string
+	Embedding      []float32
 }
 
 // NewChatHandler creates a ChatHandler.
@@ -94,26 +106,29 @@ func (h *ChatHandler) Chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 3: Embed the user's question
-	questionEmbedding, err := service.EmbedText(ctx, apiKey, req.Message)
+	// Step 3: Embed the user's question (RETRIEVAL_QUERY task type + query expansion)
+	questionEmbedding, err := service.EmbedQueryForSearch(ctx, apiKey, req.Message)
 	if err != nil {
 		log.Printf("[chat] embed question error: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to process question")
 		return
 	}
 
-	// Step 4: Vector similarity search — use a lower threshold to catch conceptual matches
+	// Step 4: Vector similarity search — threshold 0.60, LIMIT 12
 	vec := pgvector.NewVector(questionEmbedding)
 	rows, err := h.DB.Pool.Query(ctx,
 		`SELECT c.content, d.source_url,
-		        1 - (c.embedding <=> $1) AS similarity
+		        1 - (c.embedding <=> $1) AS similarity,
+		        COALESCE(d.title, '') AS page_title,
+		        COALESCE(c.section_heading, '') AS section_heading,
+		        COALESCE(c.chunk_type, 'text') AS chunk_type
 		 FROM chunks c
 		 JOIN documents d ON c.document_id = d.id
 		 WHERE c.project_id = $2
 		   AND c.embedding IS NOT NULL
-		   AND 1 - (c.embedding <=> $1) > 0.35
+		   AND 1 - (c.embedding <=> $1) > 0.60
 		 ORDER BY similarity DESC
-		 LIMIT 8`,
+		 LIMIT 12`,
 		vec, projectID,
 	)
 	if err != nil {
@@ -123,51 +138,53 @@ func (h *ChatHandler) Chat(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	type searchResult struct {
-		Content    string
-		SourceURL  string
-		Similarity float64
-	}
 	var results []searchResult
 	for rows.Next() {
 		var sr searchResult
-		if err := rows.Scan(&sr.Content, &sr.SourceURL, &sr.Similarity); err != nil {
+		if err := rows.Scan(&sr.Content, &sr.SourceURL, &sr.Similarity,
+			&sr.PageTitle, &sr.SectionHeading, &sr.ChunkType); err != nil {
 			continue
 		}
 		results = append(results, sr)
 	}
 
-	// Step 4b: Keyword fallback — if vector search found < 2 results, try keyword matching
+	// Step 4b: Keyword fallback — if vector search found < 2 results, try OR-based keyword matching
 	if len(results) < 2 {
-		// Extract meaningful words (3+ chars) from the question for keyword search
 		words := strings.Fields(strings.ToLower(req.Message))
-		var keywords []string
+		var conditions []string
+		var args []interface{}
+		args = append(args, projectID) // $1
+		argIdx := 2
 		for _, w := range words {
 			cleaned := strings.Trim(w, ".,!?\"'()[]{}:;")
 			if len(cleaned) >= 3 {
-				keywords = append(keywords, cleaned)
+				conditions = append(conditions, fmt.Sprintf("LOWER(c.content) LIKE $%d", argIdx))
+				args = append(args, "%"+cleaned+"%")
+				argIdx++
 			}
 		}
-		if len(keywords) > 0 {
-			// Build a query that matches any keyword in chunk content
-			likePattern := "%" + strings.Join(keywords, "%") + "%"
-			kwRows, kwErr := h.DB.Pool.Query(ctx,
-				`SELECT c.content, d.source_url, 0.40 AS similarity
+		if len(conditions) > 0 {
+			kwSQL := fmt.Sprintf(
+				`SELECT c.content, d.source_url, 0.55 AS similarity,
+				        COALESCE(d.title, '') AS page_title,
+				        COALESCE(c.section_heading, '') AS section_heading,
+				        COALESCE(c.chunk_type, 'text') AS chunk_type
 				 FROM chunks c
 				 JOIN documents d ON c.document_id = d.id
 				 WHERE c.project_id = $1
-				   AND LOWER(c.content) LIKE $2
-				 LIMIT 5`,
-				projectID, likePattern,
-			)
+				   AND (%s)
+				 LIMIT 5`, strings.Join(conditions, " OR "))
+			kwRows, kwErr := h.DB.Pool.Query(ctx, kwSQL, args...)
 			if kwErr == nil {
 				existingIDs := make(map[string]bool)
 				for _, r := range results {
-					existingIDs[r.Content[:min(50, len(r.Content))]] = true
+					key := r.Content[:min(50, len(r.Content))]
+					existingIDs[key] = true
 				}
 				for kwRows.Next() {
 					var sr searchResult
-					if kwRows.Scan(&sr.Content, &sr.SourceURL, &sr.Similarity) == nil {
+					if kwRows.Scan(&sr.Content, &sr.SourceURL, &sr.Similarity,
+						&sr.PageTitle, &sr.SectionHeading, &sr.ChunkType) == nil {
 						key := sr.Content[:min(50, len(sr.Content))]
 						if !existingIDs[key] {
 							results = append(results, sr)
@@ -224,18 +241,24 @@ Be concise, friendly, and professional. Keep response under 80 words.`,
 		return
 	}
 
-	// Step 6: Build RAG prompt and call Gemini
-	// Take top 5 chunks for richer context
-	contextLimit := 5
-	if len(results) < contextLimit {
-		contextLimit = len(results)
-	}
-	topResults := results[:contextLimit]
+	// Step 6: MMR rerank + build structured labelled context
+	topResults := mmrRerank(results, 5, 0.7)
 
 	var contextParts []string
 	sourceSet := make(map[string]bool)
-	for _, r := range topResults {
-		contextParts = append(contextParts, r.Content)
+	for i, r := range topResults {
+		label := fmt.Sprintf("[Source %d", i+1)
+		if r.PageTitle != "" {
+			label += " | " + r.PageTitle
+		}
+		if r.SectionHeading != "" {
+			label += " > " + r.SectionHeading
+		}
+		if r.ChunkType == "faq" {
+			label += " | FAQ"
+		}
+		label += "]"
+		contextParts = append(contextParts, label+"\n"+r.Content)
 		if r.SourceURL != "" && !sourceSet[r.SourceURL] {
 			sourceSet[r.SourceURL] = true
 			response.Sources = append(response.Sources, r.SourceURL)
@@ -252,12 +275,17 @@ Be concise, friendly, and professional. Keep response under 80 words.`,
 	sysPrompt := systemPrompt
 	if sysPrompt == "" {
 		sysPrompt = fmt.Sprintf(
-			`You are a helpful assistant for %s.
-Answer using the context provided below. Base your response on the most relevant information you find in the context.
-If the context contains related concepts, use them to construct a helpful answer even if the exact terms differ.
-If the answer is truly not in the context at all, say: "I don't have that information. Please contact support."
-Be concise and friendly.
-Keep your answer under 200 words unless the question requires more detail.`,
+			`You are %s, a friendly and knowledgeable assistant.
+
+RULES:
+1. Answer ONLY from the [Source ...] blocks below.
+2. If you use information from a source, reference it as [Source N].
+3. If the sources contain FAQ-type content (Q: / A:), prefer it for direct questions.
+4. If the context does not contain the answer, say:
+   "I don't have that information in my knowledge base. Please contact support."
+5. Keep answers under 150 words unless the user asks for detail.
+6. Use short paragraphs and bullet points for readability.
+7. Never invent facts, URLs, phone numbers, or prices not in the context.`,
 			assistantName,
 		)
 	}
@@ -285,6 +313,76 @@ Keep your answer under 200 words unless the question requires more detail.`,
 	json.NewEncoder(w).Encode(response)
 }
 
+// mmrRerank applies Maximal Marginal Relevance to balance relevance and diversity.
+// lambda controls the trade-off: 1.0 = pure relevance, 0.0 = pure diversity.
+func mmrRerank(results []searchResult, topK int, lambda float64) []searchResult {
+	if len(results) <= topK {
+		return results
+	}
+
+	selected := []searchResult{results[0]}
+	used := map[int]bool{0: true}
+
+	for len(selected) < topK {
+		bestIdx := -1
+		bestScore := -math.MaxFloat64
+
+		for i, cand := range results {
+			if used[i] {
+				continue
+			}
+
+			// Max similarity between candidate and already-selected items
+			maxSim := 0.0
+			for _, sel := range selected {
+				sim := contentSimilarity(cand.Content, sel.Content)
+				if sim > maxSim {
+					maxSim = sim
+				}
+			}
+
+			mmrScore := lambda*cand.Similarity - (1-lambda)*maxSim
+			if mmrScore > bestScore {
+				bestScore = mmrScore
+				bestIdx = i
+			}
+		}
+
+		if bestIdx < 0 {
+			break
+		}
+		selected = append(selected, results[bestIdx])
+		used[bestIdx] = true
+	}
+
+	return selected
+}
+
+// contentSimilarity computes a simple Jaccard word-overlap similarity between two texts.
+func contentSimilarity(a, b string) float64 {
+	wordsA := make(map[string]bool)
+	for _, w := range strings.Fields(strings.ToLower(a)) {
+		wordsA[w] = true
+	}
+	wordsB := make(map[string]bool)
+	for _, w := range strings.Fields(strings.ToLower(b)) {
+		wordsB[w] = true
+	}
+
+	intersection := 0
+	for w := range wordsA {
+		if wordsB[w] {
+			intersection++
+		}
+	}
+
+	union := len(wordsA) + len(wordsB) - intersection
+	if union == 0 {
+		return 0
+	}
+	return float64(intersection) / float64(union)
+}
+
 // callGemini calls the Gemini generative model for RAG response.
 func callGemini(ctx context.Context, apiKey, modelName, systemPrompt, userMessage string) (string, error) {
 	client, err := genai.NewClient(ctx, &genai.ClientConfig{
@@ -300,7 +398,7 @@ func callGemini(ctx context.Context, apiKey, modelName, systemPrompt, userMessag
 	}, &genai.GenerateContentConfig{
 		SystemInstruction: genai.NewContentFromText(systemPrompt, genai.RoleUser),
 		MaxOutputTokens:   2048,
-		Temperature:       genai.Ptr[float32](0.3),
+		Temperature:       genai.Ptr[float32](0.2),
 	})
 	if err != nil {
 		return "", fmt.Errorf("generate content: %w", err)

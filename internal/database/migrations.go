@@ -208,6 +208,15 @@ var migrations = []struct {
 			UPDATE projects SET website_urls = ARRAY[website_url] WHERE website_url IS NOT NULL AND website_url != '' AND (website_urls IS NULL OR website_urls = '{}');
 		`,
 	},
+	{
+		Name: "016_add_chunk_metadata_columns",
+		SQL: `
+			ALTER TABLE chunks ADD COLUMN IF NOT EXISTS page_title TEXT DEFAULT '';
+			ALTER TABLE chunks ADD COLUMN IF NOT EXISTS section_heading TEXT DEFAULT '';
+			ALTER TABLE chunks ADD COLUMN IF NOT EXISTS chunk_type TEXT DEFAULT 'text';
+			ALTER TABLE chunks ADD COLUMN IF NOT EXISTS word_count INT DEFAULT 0;
+		`,
+	},
 }
 
 // RunMigrations applies all pending migrations.
