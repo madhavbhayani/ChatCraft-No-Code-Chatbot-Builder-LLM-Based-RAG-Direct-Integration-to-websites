@@ -16,12 +16,15 @@ import {
   AlertCircle,
   X,
   Activity,
-  RotateCcw,
   Search,
   Shield,
   Star,
   ChevronDown,
   ChevronUp,
+  Pause,
+  Play,
+  Clock,
+  Calendar,
 } from "lucide-react";
 import { toast } from "sonner";
 import { getSession, isLoggedIn } from "../utils/auth";
@@ -71,6 +74,9 @@ export default function IntegratePage() {
   const [embedStats, setEmbedStats] = useState(null);
   const [embedJobId, setEmbedJobId] = useState(null);
   const [embedProgress, setEmbedProgress] = useState(null);
+  const [embedPlan, setEmbedPlan] = useState(null);
+  const [embedMode, setEmbedMode] = useState(null); // "auto" | "manual"
+  const [pausing, setPausing] = useState(false);
   const embedPollRef = useRef(null);
 
   // Crawl job polling state
@@ -153,6 +159,27 @@ export default function IntegratePage() {
           setEmbedJobId(data.active_embed_job_id);
           setEmbedding(true);
           setCurrentStep(3);
+        }
+
+        // Fetch embed plan for Step 3
+        const pendingForPlan = data.pending_chunks ?? (data.chunk_count - data.embedded_count);
+        if (pendingForPlan > 0 && !data.active_embed_job_id) {
+          try {
+            const planRes = await fetch(`${API}/console/embed-plan/${projectId}`, {
+              headers: { Authorization: `Bearer ${getToken()}` },
+            });
+            if (planRes.ok) {
+              const plan = await planRes.json();
+              setEmbedPlan(plan);
+
+              // Auto-resume: if last job was paused in "auto" mode and there are pending chunks
+              // BUT skip if quota was exhausted today (prevents infinite retry loop)
+              if (plan.last_job_status === "paused" && plan.last_job_mode === "auto" && plan.pending_chunks > 0 && !plan.quota_exhausted_today) {
+                // Auto-start new embed job
+                handleEmbedWithMode("auto");
+              }
+            }
+          } catch {}
         }
       }
     } catch (err) {
@@ -461,23 +488,33 @@ export default function IntegratePage() {
         const data = await res.json();
         console.log("[embed-poll] Received:", data.status, "embedded:", data.embedded, "/", data.total_chunks);
         setEmbedProgress(data);
+        if (data.mode) setEmbedMode(data.mode);
 
         if (data.status === "done") {
           stopEmbedPolling();
           setEmbedding(false);
+          setPausing(false);
           setEmbedStats({ embedded: data.embedded, total: data.total_chunks });
           setCompletedSteps((prev) => new Set([...prev, 3]));
           toast.success(`Embeddings complete: ${data.embedded} chunks embedded`);
+          fetchStatus();
+        } else if (data.status === "paused") {
+          stopEmbedPolling();
+          setEmbedding(false);
+          setPausing(false);
+          toast.warning(data.error_message || `Embedding paused after ${data.embedded} chunks.`);
+          fetchStatus();
         } else if (data.status === "failed") {
           stopEmbedPolling();
           setEmbedding(false);
+          setPausing(false);
           toast.error(data.error_message || "Embedding failed");
         }
       } catch (err) {
         console.error("Embed poll error:", err);
       }
-    }, 2500);
-  }, [getToken, stopEmbedPolling]);
+    }, 3000);
+  }, [getToken, stopEmbedPolling, fetchStatus]);
 
   // Auto-resume embed polling when embedJobId is set (e.g. after page refresh)
   useEffect(() => {
@@ -486,25 +523,29 @@ export default function IntegratePage() {
     }
   }, [embedJobId, embedding, startEmbedPolling]);
 
-  // ---------- Step 3: Embed ----------
-  const handleEmbed = async () => {
+  // ---------- Step 3: Embed with mode ----------
+  const handleEmbedWithMode = async (mode) => {
     setEmbedding(true);
     setEmbedProgress(null);
+    setEmbedMode(mode);
+    setPausing(false);
     try {
       const res = await fetch(`${API}/console/embed/${projectId}`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${getToken()}` },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${getToken()}`,
+        },
+        body: JSON.stringify({ mode }),
       });
       const data = await res.json();
       if (!res.ok && res.status !== 202) throw new Error(data.error || "Embedding failed");
 
-      // Async embed: server returns 202 with job_id
       if (data.job_id) {
         setEmbedJobId(data.job_id);
-        toast.success("Embedding started! Tracking progress...");
+        toast.success(mode === "auto" ? "Auto-embedding started! We'll handle everything." : "Embedding started! You can pause anytime.");
         startEmbedPolling(data.job_id);
       } else {
-        // No chunks to embed response
         setEmbedStats(data);
         setCompletedSteps((prev) => new Set([...prev, 3]));
         toast.success(data.message);
@@ -516,31 +557,20 @@ export default function IntegratePage() {
     }
   };
 
-  const handleReEmbedAll = async () => {
-    setEmbedding(true);
-    setEmbedProgress(null);
-    setEmbedStats(null);
+  const handlePauseEmbed = async () => {
+    if (!embedJobId) return;
+    setPausing(true);
     try {
-      const res = await fetch(`${API}/console/re-embed/${projectId}`, {
+      const res = await fetch(`${API}/console/embed-pause/${embedJobId}`, {
         method: "POST",
         headers: { Authorization: `Bearer ${getToken()}` },
       });
       const data = await res.json();
-      if (!res.ok && res.status !== 202) throw new Error(data.error || "Re-embed failed");
-
-      if (data.job_id) {
-        setEmbedJobId(data.job_id);
-        toast.success("Re-embedding all chunks...");
-        startEmbedPolling(data.job_id);
-      } else {
-        setEmbedStats(data);
-        setCompletedSteps((prev) => new Set([...prev, 3]));
-        toast.success(data.message);
-        setEmbedding(false);
-      }
+      if (!res.ok) throw new Error(data.error || "Failed to pause");
+      toast.info("Pause signal sent. Job will stop after current chunk.");
     } catch (err) {
       toast.error(err.message);
-      setEmbedding(false);
+      setPausing(false);
     }
   };
 
@@ -953,7 +983,7 @@ export default function IntegratePage() {
                       <Activity size={18} className="text-crimson animate-pulse" />
                       <div>
                         <p className="text-sm font-bold text-charcoal">
-                          {crawlProgress.current_phase === "crawling" && "Crawling website pages..."}
+                          {crawlProgress.current_phase === "crawling" && "Finding pages..."}
                           {crawlProgress.current_phase === "comparing" && "Comparing with existing data..."}
                           {crawlProgress.current_phase === "processing" && "Processing & storing pages..."}
                           {crawlProgress.current_phase === "chunking" && "Auto-chunking pages into smaller pieces..."}
@@ -964,8 +994,22 @@ export default function IntegratePage() {
                       </div>
                     </div>
 
-                    {/* Progress bar */}
-                    {crawlProgress.total_urls > 0 && (
+                    {/* During crawling phase: show page counter instead of progress bar */}
+                    {crawlProgress.current_phase === "crawling" && (
+                      <div className="flex items-center gap-4 p-4 rounded-lg bg-crimson/5 border border-crimson/15">
+                        <div className="flex items-center gap-2">
+                          <Globe size={16} className="text-crimson animate-pulse" />
+                          <span className="text-lg font-bold text-crimson">{crawlProgress.crawled_urls || 0}</span>
+                          <span className="text-sm text-charcoal/70">Pages Found & Crawled</span>
+                        </div>
+                        {crawlProgress.skipped_urls > 0 && (
+                          <span className="text-xs text-muted">({crawlProgress.skipped_urls} skipped)</span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* After crawling phase: show progress bar for comparing/processing/chunking */}
+                    {crawlProgress.current_phase !== "crawling" && crawlProgress.total_urls > 0 && (
                       <div>
                         <div className="flex items-center justify-between mb-1.5">
                           <span className="text-xs font-medium text-charcoal">
@@ -986,13 +1030,15 @@ export default function IntegratePage() {
                       </div>
                     )}
 
-                    {/* Stats grid */}
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                      <MiniStat label="Total URLs" value={crawlProgress.total_urls} />
-                      <MiniStat label="New/Updated" value={crawlProgress.crawled_urls} color="text-success" />
-                      <MiniStat label="Skipped" value={crawlProgress.skipped_urls} color="text-muted" />
-                      <MiniStat label="Chunks" value={crawlProgress.chunks_created} color="text-crimson" />
-                    </div>
+                    {/* Stats grid — only show after discovery is done */}
+                    {crawlProgress.current_phase !== "crawling" && (
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <MiniStat label="Total URLs" value={crawlProgress.total_urls} />
+                        <MiniStat label="New/Updated" value={crawlProgress.crawled_urls} color="text-success" />
+                        <MiniStat label="Skipped" value={crawlProgress.skipped_urls} color="text-muted" />
+                        <MiniStat label="Chunks" value={crawlProgress.chunks_created} color="text-crimson" />
+                      </div>
+                    )}
 
                     {/* Live log */}
                     {crawlProgress.recent_logs && crawlProgress.recent_logs.length > 0 && (
@@ -1002,7 +1048,7 @@ export default function IntegratePage() {
                           {crawlProgress.recent_logs
                             .slice()
                             .reverse()
-                            .slice(0, 15)
+                            .slice(0, 20)
                             .map((entry, i) => (
                               <div key={i} className="text-charcoal/70 leading-relaxed truncate">
                                 {entry.msg}
@@ -1226,7 +1272,7 @@ export default function IntegratePage() {
                   </div>
                 )}
 
-                {/* Embed result */}
+                {/* Embed result — all done */}
                 {embedStats ? (
                   <div className="p-4 rounded-lg bg-success/10 border border-success/30">
                     <div className="flex items-center gap-2 mb-2">
@@ -1240,87 +1286,152 @@ export default function IntegratePage() {
                   </div>
                 ) : (
                   <>
-                    {/* Two embed options */}
-                    <div className="grid grid-cols-2 gap-4">
-                      {/* Option 1: Embed Pending */}
-                      <div className="border border-light-rose rounded-xl p-5 bg-white">
-                        <div className="flex items-center gap-2 mb-2">
-                          <Zap size={16} className="text-crimson" />
-                          <h4 className="text-sm font-bold text-charcoal">Embed Pending Chunks</h4>
+                    {/* Embed Plan — show before embedding starts */}
+                    {!embedding && embedPlan && embedPlan.pending_chunks > 0 && (
+                      <div className="p-5 rounded-xl border border-light-rose bg-white space-y-4">
+                        <div className="flex items-center gap-2 mb-1">
+                          <Calendar size={16} className="text-crimson" />
+                          <h4 className="text-sm font-bold text-charcoal">Embedding Plan</h4>
                         </div>
-                        <p className="text-xs text-muted mb-4 leading-relaxed">
-                          Embed only chunks that don't have embeddings yet.
-                          {statusData?.pending_chunks > 0
-                            ? ` Found ${statusData.pending_chunks} pending chunk${statusData.pending_chunks !== 1 ? "s" : ""}.`
-                            : " No pending chunks found."}
-                        </p>
-                        <button
-                          onClick={handleEmbed}
-                          disabled={embedding || !(statusData?.pending_chunks > 0 || (statusData?.chunk_count > statusData?.embedded_count))}
-                          className="w-full flex items-center justify-center gap-2 bg-crimson text-white px-4 py-2.5 rounded-lg font-semibold text-sm
-                                     hover:bg-rose-pink transition-all duration-200 cursor-pointer shadow-sm disabled:opacity-50"
-                        >
-                          {embedding ? (
-                            <>
-                              <Loader2 size={16} className="animate-spin" />
-                              Embedding...
-                            </>
-                          ) : (
-                            <>
-                              <Zap size={16} />
-                              Embed Pending Data
-                            </>
-                          )}
-                        </button>
-                      </div>
 
-                      {/* Option 2: Re-Embed All */}
-                      <div className="border border-amber-200 rounded-xl p-5 bg-amber-50/30">
-                        <div className="flex items-center gap-2 mb-2">
-                          <RotateCcw size={16} className="text-amber-600" />
-                          <h4 className="text-sm font-bold text-charcoal">Re-Embed All Chunks</h4>
-                        </div>
-                        <p className="text-xs text-muted mb-4 leading-relaxed">
-                          Clear all existing embeddings and re-generate them from scratch.
-                          This is useful if you've changed the chunking or want a fresh start.
-                        </p>
-                        <button
-                          onClick={handleReEmbedAll}
-                          disabled={embedding || !statusData?.chunk_count}
-                          className="w-full flex items-center justify-center gap-2 bg-amber-600 text-white px-4 py-2.5 rounded-lg font-semibold text-sm
-                                     hover:bg-amber-700 transition-all duration-200 cursor-pointer shadow-sm disabled:opacity-50"
-                        >
-                          {embedding ? (
-                            <>
-                              <Loader2 size={16} className="animate-spin" />
-                              Re-embedding...
-                            </>
-                          ) : (
-                            <>
-                              <RotateCcw size={16} />
-                              Re-Embed All Data
-                            </>
-                          )}
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Embed progress */}
-                    {embedding && embedProgress && (
-                      <div className="p-5 rounded-xl border border-light-rose bg-white space-y-4 animate-fade-in">
-                        <div className="flex items-center gap-3">
-                          <Zap size={18} className="text-crimson animate-pulse" />
-                          <div>
-                            <p className="text-sm font-bold text-charcoal">Embedding chunks with Gemini API...</p>
-                            <p className="text-xs text-muted">
-                              {embedProgress.embedded} / {embedProgress.total_chunks} chunks embedded
-                              {embedProgress.failed > 0 && (
-                                <span className="text-crimson ml-2">({embedProgress.failed} failed)</span>
-                              )}
-                            </p>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                          <div className="p-3 rounded-lg bg-crimson/5 border border-crimson/15 text-center">
+                            <p className="text-lg font-bold text-crimson">{embedPlan.pending_chunks}</p>
+                            <p className="text-[10px] text-muted">Total Pending</p>
+                          </div>
+                          <div className="p-3 rounded-lg bg-success/5 border border-success/15 text-center">
+                            <p className="text-lg font-bold text-success">{embedPlan.today_chunks}</p>
+                            <p className="text-[10px] text-muted">Today's Batch</p>
+                          </div>
+                          <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-center">
+                            <p className="text-lg font-bold text-amber-600">{embedPlan.tomorrow_chunks}</p>
+                            <p className="text-[10px] text-muted">Tomorrow+</p>
+                          </div>
+                          <div className="p-3 rounded-lg bg-blue-50 border border-blue-200 text-center">
+                            <p className="text-lg font-bold text-blue-600">~{embedPlan.estimated_time_minutes} min</p>
+                            <p className="text-[10px] text-muted">Est. Today</p>
                           </div>
                         </div>
-                        {embedProgress.total_chunks > 0 && (
+
+                        {/* Rate limit info */}
+                        <div className="flex items-start gap-2 p-3 rounded-lg bg-light-rose/30 border border-light-rose">
+                          <Info size={14} className="text-muted shrink-0 mt-0.5" />
+                          <p className="text-xs text-charcoal/70 leading-relaxed">
+                            Gemini free tier allows <span className="font-semibold">{embedPlan.rpm_limit} requests/min</span> and{" "}
+                            <span className="font-semibold">{embedPlan.rpd_limit} requests/day</span>.
+                            {embedPlan.total_days > 1 && (
+                              <span> This will take <span className="font-semibold text-crimson">{embedPlan.total_days} days</span> to complete all chunks.</span>
+                            )}
+                          </p>
+                        </div>
+
+                        {/* Two options */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          {/* Option 1: Auto mode */}
+                          <div className="border border-success/30 rounded-xl p-5 bg-success/5">
+                            <div className="flex items-center gap-2 mb-2">
+                              <Zap size={16} className="text-success" />
+                              <h4 className="text-sm font-bold text-charcoal">Automatic</h4>
+                            </div>
+                            <p className="text-xs text-muted mb-4 leading-relaxed">
+                              Embed all chunks automatically. Handles rate limits, pauses on daily quota, and auto-resumes next time you visit.
+                            </p>
+                            <button
+                              onClick={() => handleEmbedWithMode("auto")}
+                              disabled={embedding}
+                              className="w-full flex items-center justify-center gap-2 bg-success text-white px-4 py-2.5 rounded-lg font-semibold text-sm
+                                         hover:bg-success/80 transition-all duration-200 cursor-pointer shadow-sm disabled:opacity-50"
+                            >
+                              <Zap size={16} />
+                              Embed Automatically
+                            </button>
+                          </div>
+
+                          {/* Option 2: Manual mode */}
+                          <div className="border border-light-rose rounded-xl p-5 bg-white">
+                            <div className="flex items-center gap-2 mb-2">
+                              <Play size={16} className="text-crimson" />
+                              <h4 className="text-sm font-bold text-charcoal">Manual Control</h4>
+                            </div>
+                            <p className="text-xs text-muted mb-4 leading-relaxed">
+                              Start embedding and pause whenever you want. You control when to start and stop. Resume anytime.
+                            </p>
+                            <button
+                              onClick={() => handleEmbedWithMode("manual")}
+                              disabled={embedding}
+                              className="w-full flex items-center justify-center gap-2 bg-crimson text-white px-4 py-2.5 rounded-lg font-semibold text-sm
+                                         hover:bg-rose-pink transition-all duration-200 cursor-pointer shadow-sm disabled:opacity-50"
+                            >
+                              <Play size={16} />
+                              Start Manually
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* No pending chunks but also not complete */}
+                    {!embedding && embedPlan && embedPlan.pending_chunks === 0 && statusData?.embedded_count > 0 && (
+                      <div className="p-4 rounded-lg bg-success/10 border border-success/30">
+                        <div className="flex items-center gap-2 mb-2">
+                          <CheckCircle2 size={20} className="text-success" />
+                          <p className="text-sm font-semibold text-charcoal">All chunks are embedded!</p>
+                        </div>
+                        <p className="text-xs text-muted">
+                          {statusData.embedded_count} chunks embedded. Your chatbot is ready.
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Embed progress — active job */}
+                    {embedding && (
+                      <div className="p-5 rounded-xl border border-light-rose bg-white space-y-4 animate-fade-in">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <Zap size={18} className="text-crimson animate-pulse" />
+                            <div>
+                              <p className="text-sm font-bold text-charcoal">
+                                Embedding chunks with Gemini API...
+                              </p>
+                              {embedProgress && (
+                                <p className="text-xs text-muted">
+                                  {embedProgress.embedded} / {embedProgress.total_chunks} chunks embedded
+                                  {embedProgress.failed > 0 && (
+                                    <span className="text-crimson ml-2">({embedProgress.failed} failed)</span>
+                                  )}
+                                  {embedMode && (
+                                    <span className="ml-2 px-1.5 py-0.5 rounded-full bg-light-rose text-[10px] font-semibold uppercase">
+                                      {embedMode} mode
+                                    </span>
+                                  )}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Pause button */}
+                          <button
+                            onClick={handlePauseEmbed}
+                            disabled={pausing}
+                            className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-amber-300 bg-amber-50 text-amber-700 text-sm font-semibold
+                                       hover:bg-amber-100 transition-all cursor-pointer disabled:opacity-50"
+                          >
+                            {pausing ? (
+                              <>
+                                <Loader2 size={14} className="animate-spin" />
+                                Pausing...
+                              </>
+                            ) : (
+                              <>
+                                <Pause size={14} />
+                                Pause
+                              </>
+                            )}
+                          </button>
+                        </div>
+
+                        {/* Progress bar */}
+                        {embedProgress && embedProgress.total_chunks > 0 && (
                           <div>
                             <div className="flex items-center justify-between mb-1.5">
                               <span className="text-xs font-medium text-charcoal">
@@ -1340,6 +1451,37 @@ export default function IntegratePage() {
                             </div>
                           </div>
                         )}
+
+                        {/* Rate limit info during embedding */}
+                        <div className="flex items-center gap-2 text-xs text-muted">
+                          <Clock size={12} />
+                          <span>Rate limited to {embedPlan?.rpm_limit || 100} requests/min • Progress updates every 30s</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Paused state — show resume option */}
+                    {!embedding && embedProgress?.status === "paused" && (
+                      <div className="p-5 rounded-xl border border-amber-200 bg-amber-50/50 space-y-3">
+                        <div className="flex items-center gap-2">
+                          <Pause size={18} className="text-amber-600" />
+                          <div>
+                            <p className="text-sm font-bold text-charcoal">Embedding Paused</p>
+                            <p className="text-xs text-muted">{embedProgress.error_message}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-muted">
+                          <span>{embedProgress.embedded} / {embedProgress.total_chunks} chunks embedded so far</span>
+                        </div>
+                        <button
+                          onClick={() => handleEmbedWithMode(embedMode || "auto")}
+                          disabled={embedding}
+                          className="flex items-center gap-2 bg-crimson text-white px-5 py-2 rounded-lg font-semibold text-sm
+                                     hover:bg-rose-pink transition-all duration-200 cursor-pointer shadow-sm disabled:opacity-50"
+                        >
+                          <Play size={14} />
+                          Resume Embedding
+                        </button>
                       </div>
                     )}
                   </>

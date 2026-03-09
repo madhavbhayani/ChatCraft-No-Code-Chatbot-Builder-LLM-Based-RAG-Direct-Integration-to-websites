@@ -114,7 +114,15 @@ export default function ConsolePage() {
         ]);
         const projData = await projRes.json();
         if (projData.project) setProjectName(projData.project.name);
-        if (statusRes.ok) setStatusData(await statusRes.json());
+        if (statusRes.ok) {
+          const status = await statusRes.json();
+          setStatusData(status);
+          // If setup is not complete, redirect to the setup wizard
+          if (status.setup_step < 3) {
+            navigate(`/console/integrate/${projectId}`, { replace: true });
+            return;
+          }
+        }
       } catch (err) {
         console.error("Failed to fetch project data:", err);
       } finally {
