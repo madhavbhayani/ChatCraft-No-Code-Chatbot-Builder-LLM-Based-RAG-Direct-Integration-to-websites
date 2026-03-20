@@ -7,6 +7,8 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/madhavbhayani/ChatCraft-No-Code-Chatbot-Builder-LLM-Based-RAG-Direct-Integration-to-websites/internal/database"
@@ -81,16 +83,28 @@ func (h *ChatHandler) Chat(w http.ResponseWriter, r *http.Request) {
 
 	// Step 1: Resolve project from bot_token (bot_token = project_id for now)
 	var projectID, encryptedKey, systemPrompt, botName, llmModel string
+	var fallbackResponseText, customFallbackFieldsJSON string
 	var maxInputTokens int
+	var fallbackResponseEnabled bool
 	err := h.DB.Pool.QueryRow(ctx,
 		`SELECT id, COALESCE(gemini_api_key_encrypted, ''), COALESCE(system_prompt, ''), COALESCE(bot_name, ''),
-		        COALESCE(llm_model, 'gemini-2.5-flash'), COALESCE(max_input_tokens, 50000)
+		        COALESCE(llm_model, 'gemini-2.5-flash'), COALESCE(max_input_tokens, 50000),
+		        COALESCE(fallback_response_enabled, true),
+		        COALESCE(fallback_response_text, 'I don''t have that information in my knowledge base. Please contact support.'),
+		        COALESCE(custom_fallback_fields::text, '[]')
 		 FROM projects
 		 WHERE id = $1 AND status = 'active'`, botToken,
-	).Scan(&projectID, &encryptedKey, &systemPrompt, &botName, &llmModel, &maxInputTokens)
+	).Scan(&projectID, &encryptedKey, &systemPrompt, &botName, &llmModel, &maxInputTokens, &fallbackResponseEnabled, &fallbackResponseText, &customFallbackFieldsJSON)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "Bot not found or inactive")
 		return
+	}
+
+	customFallbackFields := []string{}
+	if customFallbackFieldsJSON != "" {
+		if err := json.Unmarshal([]byte(customFallbackFieldsJSON), &customFallbackFields); err != nil {
+			customFallbackFields = []string{}
+		}
 	}
 
 	if encryptedKey == "" {
@@ -214,21 +228,40 @@ func (h *ChatHandler) Chat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(results) == 0 {
-		// No relevant results — use LLM to generate a helpful fallback
-		fallbackPrompt := fmt.Sprintf(
-			`You are a helpful assistant for %s.
+		// No relevant results — use configured fallback, optionally with custom contact fields.
+		if fallbackResponseEnabled {
+			base := strings.TrimSpace(fallbackResponseText)
+			if base == "" {
+				base = "I don't have that information in my knowledge base. Please contact support."
+			}
+			if len(customFallbackFields) > 0 {
+				lines := []string{base, "", "You can contact us via:"}
+				for _, field := range customFallbackFields {
+					f := strings.TrimSpace(field)
+					if f != "" {
+						lines = append(lines, "- "+f)
+					}
+				}
+				response.Answer = strings.Join(lines, "\n")
+			} else {
+				response.Answer = base
+			}
+		} else {
+			fallbackPrompt := fmt.Sprintf(
+				`You are a helpful assistant for %s.
 The user asked a question but no relevant information was found in your knowledge base.
 Politely let them know you don't have specific information about their query in the knowledge base.
 Still try to be helpful — suggest they rephrase or provide more context.
 Be concise, friendly, and professional. Keep response under 80 words.`,
-			assistantName,
-		)
-		fallbackAnswer, err := callGemini(ctx, apiKey, llmModel, fallbackPrompt, req.Message)
-		if err != nil {
-			log.Printf("[chat] fallback LLM error: %v", err)
-			response.Answer = "I don't have specific information about that in my knowledge base. Could you try rephrasing your question, or reach out to support for more help?"
-		} else {
-			response.Answer = fallbackAnswer
+				assistantName,
+			)
+			fallbackAnswer, err := callGemini(ctx, apiKey, llmModel, fallbackPrompt, req.Message)
+			if err != nil {
+				log.Printf("[chat] fallback LLM error: %v", err)
+				response.Answer = "I don't have specific information about that in my knowledge base. Could you try rephrasing your question, or reach out to support for more help?"
+			} else {
+				response.Answer = fallbackAnswer
+			}
 		}
 		response.Fallback = true
 		response.Sources = []string{}
@@ -245,8 +278,10 @@ Be concise, friendly, and professional. Keep response under 80 words.`,
 	topResults := mmrRerank(results, 5, 0.7)
 
 	var contextParts []string
+	sourceURLsByNumber := make([]string, len(topResults))
 	sourceSet := make(map[string]bool)
 	for i, r := range topResults {
+		sourceURLsByNumber[i] = strings.TrimSpace(r.SourceURL)
 		label := fmt.Sprintf("[Source %d", i+1)
 		if r.PageTitle != "" {
 			label += " | " + r.PageTitle
@@ -279,18 +314,27 @@ Be concise, friendly, and professional. Keep response under 80 words.`,
 
 RULES:
 1. Answer ONLY from the [Source ...] blocks below.
-2. If you use information from a source, reference it as [Source N].
+2. If you use information from a source, reference it inline as [Source N].
 3. If the sources contain FAQ-type content (Q: / A:), prefer it for direct questions.
 4. If the context does not contain the answer, say:
    "I don't have that information in my knowledge base. Please contact support."
 5. Keep answers under 150 words unless the user asks for detail.
 6. Use short paragraphs and bullet points for readability.
-7. Never invent facts, URLs, phone numbers, or prices not in the context.`,
+7. Never invent facts, URLs, phone numbers, or prices not in the context.
+8. Do NOT add a separate "Sources" section at the end. Citations must stay inline.
+9. Use a markdown table ONLY when data is structured and comparable with at least 3 rows and at least 2 columns.
+10. A table must be meaningful and concise: max 5 rows and max 5 columns.
+11. If data exceeds table limits or is not naturally tabular, use normal text instead.`,
 			assistantName,
 		)
 	}
 
-	fullSystemPrompt := sysPrompt + "\n\nContext:\n" + contextText
+	tableGuidance := `Formatting guidance:
+- Do not create tables for narrative text.
+- Create tables only for concise, comparable facts (e.g., pricing, plans, feature comparisons).
+- Keep table content short and useful.`
+
+	fullSystemPrompt := sysPrompt + "\n\n" + tableGuidance + "\n\nContext:\n" + contextText
 
 	// Call Gemini generative model
 	answer, err := callGemini(ctx, apiKey, llmModel, fullSystemPrompt, req.Message)
@@ -299,7 +343,7 @@ RULES:
 		response.Answer = "I'm having trouble generating a response right now. Please try again."
 		response.Fallback = true
 	} else {
-		response.Answer = answer
+		response.Answer = stripSourcesSection(replaceSourceReferencesWithLinks(answer, sourceURLsByNumber))
 	}
 
 	if response.Sources == nil {
@@ -311,6 +355,49 @@ RULES:
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
+}
+
+var sourceRefRegex = regexp.MustCompile(`\[Source\s+(\d+)\]`)
+
+func replaceSourceReferencesWithLinks(answer string, sourceURLsByNumber []string) string {
+	if answer == "" || len(sourceURLsByNumber) == 0 {
+		return answer
+	}
+
+	return sourceRefRegex.ReplaceAllStringFunc(answer, func(match string) string {
+		parts := sourceRefRegex.FindStringSubmatch(match)
+		if len(parts) != 2 {
+			return match
+		}
+		n, err := strconv.Atoi(parts[1])
+		if err != nil || n < 1 || n > len(sourceURLsByNumber) {
+			return match
+		}
+
+		src := strings.TrimSpace(sourceURLsByNumber[n-1])
+		if src == "" || (!strings.HasPrefix(src, "http://") && !strings.HasPrefix(src, "https://")) {
+			return match
+		}
+
+		return fmt.Sprintf("[Source %d](%s)", n, src)
+	})
+}
+
+func stripSourcesSection(answer string) string {
+	if answer == "" {
+		return answer
+	}
+
+	lines := strings.Split(answer, "\n")
+	for i, line := range lines {
+		normalized := strings.ToLower(strings.TrimSpace(line))
+		if normalized == "sources" || normalized == "source" ||
+			strings.HasPrefix(normalized, "sources:") || strings.HasPrefix(normalized, "source:") {
+			return strings.TrimSpace(strings.Join(lines[:i], "\n"))
+		}
+	}
+
+	return strings.TrimSpace(answer)
 }
 
 // mmrRerank applies Maximal Marginal Relevance to balance relevance and diversity.

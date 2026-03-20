@@ -1271,17 +1271,22 @@ func (h *BotBuilderHandler) GetSetupStatus(w http.ResponseWriter, r *http.Reques
 	// Verify ownership
 	var ownerID, websiteURL string
 	var websiteURLs []string
+	var fallbackResponseText, customFallbackFieldsJSON string
 	var setupStep int
 	var hasAPIKey bool
+	var fallbackResponseEnabled bool
 	var llmModel string
 	var llmRPM, llmTPM, llmRPD, maxInputTokens int
 	err := h.DB.Pool.QueryRow(r.Context(),
 		`SELECT user_id, COALESCE(website_url, ''), COALESCE(website_urls, '{}'), setup_step, 
 		        (gemini_api_key_encrypted IS NOT NULL AND gemini_api_key_encrypted != ''),
 		        COALESCE(llm_model, 'gemini-2.5-flash'), COALESCE(llm_rpm, 5), COALESCE(llm_tpm, 250000),
-		        COALESCE(llm_rpd, 20), COALESCE(max_input_tokens, 50000)
+		        COALESCE(llm_rpd, 20), COALESCE(max_input_tokens, 50000),
+		        COALESCE(fallback_response_enabled, true),
+		        COALESCE(fallback_response_text, 'I don''t have that information in my knowledge base. Please contact support.'),
+		        COALESCE(custom_fallback_fields::text, '[]')
 		 FROM projects WHERE id = $1`, projectID,
-	).Scan(&ownerID, &websiteURL, &websiteURLs, &setupStep, &hasAPIKey, &llmModel, &llmRPM, &llmTPM, &llmRPD, &maxInputTokens)
+	).Scan(&ownerID, &websiteURL, &websiteURLs, &setupStep, &hasAPIKey, &llmModel, &llmRPM, &llmTPM, &llmRPD, &maxInputTokens, &fallbackResponseEnabled, &fallbackResponseText, &customFallbackFieldsJSON)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "Project not found")
 		return
@@ -1289,6 +1294,13 @@ func (h *BotBuilderHandler) GetSetupStatus(w http.ResponseWriter, r *http.Reques
 	if ownerID != userID {
 		writeError(w, http.StatusForbidden, "Not your project")
 		return
+	}
+
+	customFallbackFields := []string{}
+	if customFallbackFieldsJSON != "" {
+		if err := json.Unmarshal([]byte(customFallbackFieldsJSON), &customFallbackFields); err != nil {
+			customFallbackFields = []string{}
+		}
 	}
 
 	// Count documents
@@ -1358,20 +1370,23 @@ func (h *BotBuilderHandler) GetSetupStatus(w http.ResponseWriter, r *http.Reques
 
 	w.Header().Set("Content-Type", "application/json")
 	resp := map[string]interface{}{
-		"setup_step":       setupStep,
-		"website_url":      websiteURL,
-		"website_urls":     websiteURLs,
-		"has_api_key":      hasAPIKey,
-		"document_count":   docCount,
-		"chunk_count":      chunkCount,
-		"embedded_count":   embeddedCount,
-		"pending_chunks":   pendingChunks,
-		"documents":        documents,
-		"llm_model":        llmModel,
-		"llm_rpm":          llmRPM,
-		"llm_tpm":          llmTPM,
-		"llm_rpd":          llmRPD,
-		"max_input_tokens": maxInputTokens,
+		"setup_step":                setupStep,
+		"website_url":               websiteURL,
+		"website_urls":              websiteURLs,
+		"has_api_key":               hasAPIKey,
+		"document_count":            docCount,
+		"chunk_count":               chunkCount,
+		"embedded_count":            embeddedCount,
+		"pending_chunks":            pendingChunks,
+		"documents":                 documents,
+		"llm_model":                 llmModel,
+		"llm_rpm":                   llmRPM,
+		"llm_tpm":                   llmTPM,
+		"llm_rpd":                   llmRPD,
+		"max_input_tokens":          maxInputTokens,
+		"fallback_response_enabled": fallbackResponseEnabled,
+		"fallback_response_text":    fallbackResponseText,
+		"custom_fallback_fields":    customFallbackFields,
 	}
 	if activeCrawlJobID != nil {
 		resp["active_crawl_job_id"] = *activeCrawlJobID
@@ -1590,6 +1605,87 @@ func (h *BotBuilderHandler) UpdateProjectSettings(w http.ResponseWriter, r *http
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"message": "Project updated successfully",
+	})
+}
+
+// UpdateBehaviorSettings updates fallback behavior settings for chat responses.
+func (h *BotBuilderHandler) UpdateBehaviorSettings(w http.ResponseWriter, r *http.Request) {
+	userID := r.Header.Get("X-User-ID")
+	projectID := r.PathValue("project_id")
+	if projectID == "" {
+		writeError(w, http.StatusBadRequest, "Project ID is required")
+		return
+	}
+
+	var ownerID string
+	err := h.DB.Pool.QueryRow(r.Context(),
+		"SELECT user_id FROM projects WHERE id = $1", projectID,
+	).Scan(&ownerID)
+	if err != nil || ownerID != userID {
+		writeError(w, http.StatusForbidden, "Not your project")
+		return
+	}
+
+	var req struct {
+		FallbackResponseEnabled bool     `json:"fallback_response_enabled"`
+		FallbackResponseText    string   `json:"fallback_response_text"`
+		CustomFallbackFields    []string `json:"custom_fallback_fields"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	defaultFallback := "I don't have that information in my knowledge base. Please contact support."
+	req.FallbackResponseText = strings.TrimSpace(req.FallbackResponseText)
+	if req.FallbackResponseText == "" {
+		req.FallbackResponseText = defaultFallback
+	}
+
+	cleanFields := make([]string, 0, len(req.CustomFallbackFields))
+	seen := map[string]bool{}
+	for _, field := range req.CustomFallbackFields {
+		f := strings.TrimSpace(field)
+		if f == "" {
+			continue
+		}
+		if seen[f] {
+			continue
+		}
+		seen[f] = true
+		cleanFields = append(cleanFields, f)
+		if len(cleanFields) >= 10 {
+			break
+		}
+	}
+
+	fieldsJSON, err := json.Marshal(cleanFields)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid custom fallback fields")
+		return
+	}
+
+	_, err = h.DB.Pool.Exec(r.Context(),
+		`UPDATE projects
+		 SET fallback_response_enabled = $1,
+		     fallback_response_text = $2,
+		     custom_fallback_fields = $3::jsonb,
+		     updated_at = NOW()
+		 WHERE id = $4`,
+		req.FallbackResponseEnabled, req.FallbackResponseText, string(fieldsJSON), projectID,
+	)
+	if err != nil {
+		log.Printf("[DB] ERROR updating behavior settings: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to update behavior settings")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message":                   "Behavior settings updated successfully",
+		"fallback_response_enabled": req.FallbackResponseEnabled,
+		"fallback_response_text":    req.FallbackResponseText,
+		"custom_fallback_fields":    cleanFields,
 	})
 }
 

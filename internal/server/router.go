@@ -65,6 +65,7 @@ func NewRouter(db *database.DB) http.Handler {
 	mux.Handle("GET /api/v1/console/chunks/{project_id}", authMw(http.HandlerFunc(botBuilder.GetChunks)))
 	mux.Handle("POST /api/v1/console/test-chat/{project_id}", authMw(http.HandlerFunc(botBuilder.TestChat)))
 	mux.Handle("PUT /api/v1/console/settings/{project_id}", authMw(http.HandlerFunc(botBuilder.UpdateProjectSettings)))
+	mux.Handle("PUT /api/v1/console/settings/behavior/{project_id}", authMw(http.HandlerFunc(botBuilder.UpdateBehaviorSettings)))
 	mux.Handle("PUT /api/v1/console/model/{project_id}", authMw(http.HandlerFunc(botBuilder.SaveModelSelection)))
 	mux.Handle("DELETE /api/v1/console/data/{project_id}", authMw(http.HandlerFunc(botBuilder.DeleteProjectData)))
 

@@ -217,6 +217,14 @@ var migrations = []struct {
 			ALTER TABLE chunks ADD COLUMN IF NOT EXISTS word_count INT DEFAULT 0;
 		`,
 	},
+	{
+		Name: "017_add_chatbot_behavior_config",
+		SQL: `
+			ALTER TABLE projects ADD COLUMN IF NOT EXISTS fallback_response_enabled BOOLEAN NOT NULL DEFAULT true;
+			ALTER TABLE projects ADD COLUMN IF NOT EXISTS fallback_response_text TEXT DEFAULT 'I don''t have that information in my knowledge base. Please contact support.';
+			ALTER TABLE projects ADD COLUMN IF NOT EXISTS custom_fallback_fields JSONB DEFAULT '[]';
+		`,
+	},
 }
 
 // RunMigrations applies all pending migrations.

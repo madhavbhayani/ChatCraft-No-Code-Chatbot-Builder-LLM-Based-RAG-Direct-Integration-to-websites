@@ -563,6 +563,11 @@ export default function ConsolePage() {
                     label: "Re-Integration",
                     icon: RefreshCw,
                   },
+                  {
+                    id: "behavior",
+                    label: "Chatbot Behavior",
+                    icon: Sparkles,
+                  },
                 ].map((sub) => (
                   <button
                     key={sub.id}
@@ -708,6 +713,15 @@ export default function ConsolePage() {
                 handleReCrawl={handleReCrawl}
                 handleReEmbed={handleReEmbed}
                 handleReEmbedAll={handleReEmbedAll}
+              />
+            }
+          />
+          <Route
+            path="project-settings/behavior"
+            element={
+              <PSBehavior
+                statusData={statusData}
+                refreshStatus={refreshStatus}
               />
             }
           />
@@ -1479,11 +1493,11 @@ function ChatSection({
 function renderMarkdown(text) {
   if (!text) return null;
 
-  // Split into lines and process
   const lines = text.split("\n");
   const elements = [];
   let listItems = [];
   let listKey = 0;
+  let tableKey = 0;
 
   const flushList = () => {
     if (listItems.length > 0) {
@@ -1496,13 +1510,13 @@ function renderMarkdown(text) {
     }
   };
 
-  const processInline = (line) => {
-    // Process bold (**text**) and italic (*text*) inline
+  const renderInline = (line) => {
     const parts = [];
     let remaining = line;
     let key = 0;
 
     while (remaining.length > 0) {
+      const linkMatch = remaining.match(/\[(.+?)\]\((https?:\/\/[^\s)]+)\)/);
       // Bold: **text**
       const boldMatch = remaining.match(/\*\*(.+?)\*\*/);
       // Italic: *text* (but not **)
@@ -1510,21 +1524,22 @@ function renderMarkdown(text) {
 
       let firstMatch = null;
       let matchType = null;
+      let firstIndex = Infinity;
 
-      if (boldMatch && italicMatch) {
-        if (boldMatch.index <= italicMatch.index) {
-          firstMatch = boldMatch;
-          matchType = "bold";
-        } else {
-          firstMatch = italicMatch;
-          matchType = "italic";
-        }
-      } else if (boldMatch) {
+      if (linkMatch && linkMatch.index < firstIndex) {
+        firstMatch = linkMatch;
+        matchType = "link";
+        firstIndex = linkMatch.index;
+      }
+      if (boldMatch && boldMatch.index < firstIndex) {
         firstMatch = boldMatch;
         matchType = "bold";
-      } else if (italicMatch) {
+        firstIndex = boldMatch.index;
+      }
+      if (italicMatch && italicMatch.index < firstIndex) {
         firstMatch = italicMatch;
         matchType = "italic";
+        firstIndex = italicMatch.index;
       }
 
       if (!firstMatch) {
@@ -1538,7 +1553,22 @@ function renderMarkdown(text) {
       }
 
       // Add formatted text
-      if (matchType === "bold") {
+      if (matchType === "link") {
+        const label = firstMatch[1];
+        const href = firstMatch[2];
+        parts.push(
+          <a
+            key={key++}
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-600 hover:underline inline-flex items-center gap-0.5"
+          >
+            {label}
+            <ExternalLink size={10} />
+          </a>
+        );
+      } else if (matchType === "bold") {
         parts.push(<strong key={key++} className="font-semibold">{firstMatch[1]}</strong>);
       } else {
         parts.push(<em key={key++}>{firstMatch[1]}</em>);
@@ -1550,14 +1580,90 @@ function renderMarkdown(text) {
     return parts;
   };
 
-  lines.forEach((line, idx) => {
+  const splitTableCells = (line) =>
+    line
+      .trim()
+      .replace(/^\|/, "")
+      .replace(/\|$/, "")
+      .split("|")
+      .map((cell) => cell.trim());
+
+  const isTableDivider = (line) =>
+    /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
+
+  for (let idx = 0; idx < lines.length; idx += 1) {
+    const line = lines[idx];
     const trimmed = line.trim();
+
+    // Markdown table block
+    if (
+      idx + 1 < lines.length &&
+      line.includes("|") &&
+      isTableDivider(lines[idx + 1])
+    ) {
+      flushList();
+
+      const headers = splitTableCells(line).slice(0, 5);
+      const rows = [];
+      idx += 2; // skip header + separator
+
+      while (idx < lines.length) {
+        const rowLine = lines[idx];
+        if (!rowLine.includes("|") || rowLine.trim() === "") {
+          break;
+        }
+        const cells = splitTableCells(rowLine).slice(0, 5);
+        if (cells.length >= 2 && rows.length < 5) {
+          rows.push(cells);
+        }
+        idx += 1;
+      }
+      idx -= 1;
+
+      if (headers.length >= 2 && rows.length >= 1) {
+        elements.push(
+          <div key={`table-wrap-${tableKey}`} className="my-3 overflow-x-auto">
+            <table className="min-w-full text-xs border border-gray-200 rounded-lg overflow-hidden">
+              <thead className="bg-gray-50">
+                <tr>
+                  {headers.map((h, hIdx) => (
+                    <th
+                      key={`th-${tableKey}-${hIdx}`}
+                      className="px-3 py-2 border-b border-gray-200 text-left font-semibold text-gray-700"
+                    >
+                      {renderInline(h)}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, rIdx) => (
+                  <tr key={`tr-${tableKey}-${rIdx}`} className="bg-white even:bg-gray-50/40">
+                    {headers.map((_, cIdx) => (
+                      <td
+                        key={`td-${tableKey}-${rIdx}-${cIdx}`}
+                        className="px-3 py-2 border-b border-gray-100 align-top"
+                      >
+                        {renderInline(row[cIdx] || "")}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+        tableKey += 1;
+      }
+
+      continue;
+    }
 
     // Bullet list items: - item, * item, • item
     if (/^[-*•]\s+/.test(trimmed)) {
       const content = trimmed.replace(/^[-*•]\s+/, "");
-      listItems.push(<li key={`li-${idx}`} className="text-sm">{processInline(content)}</li>);
-      return;
+      listItems.push(<li key={`li-${idx}`} className="text-sm">{renderInline(content)}</li>);
+      continue;
     }
 
     // Numbered list items: 1. item, 2. item
@@ -1567,10 +1673,10 @@ function renderMarkdown(text) {
       elements.push(
         <div key={idx} className="flex gap-2 my-0.5">
           <span className="text-gray-400 shrink-0">{trimmed.match(/^\d+[.)]/)[0]}</span>
-          <span>{processInline(content)}</span>
+          <span>{renderInline(content)}</span>
         </div>
       );
-      return;
+      continue;
     }
 
     flushList();
@@ -1578,12 +1684,12 @@ function renderMarkdown(text) {
     // Empty line = paragraph break
     if (trimmed === "") {
       elements.push(<div key={idx} className="h-2" />);
-      return;
+      continue;
     }
 
     // Regular text
-    elements.push(<p key={idx} className="my-0.5">{processInline(trimmed)}</p>);
-  });
+    elements.push(<p key={idx} className="my-0.5">{renderInline(trimmed)}</p>);
+  }
 
   flushList();
   return elements;
@@ -1630,45 +1736,6 @@ function MessageBubble({ message }) {
             renderMarkdown(message.content)
           )}
         </div>
-
-        {!isUser && message.sources && message.sources.length > 0 && (
-          <div className="mt-2.5 pt-2 border-t border-gray-100">
-            <p className="text-xs text-gray-400 font-medium mb-1.5">Sources</p>
-            <div className="flex flex-wrap gap-1.5">
-              {message.sources.map((src, i) => {
-                let label = src;
-                try {
-                  const u = new URL(src);
-                  label = u.pathname.substring(0, 30) || "/";
-                } catch {
-                  label = src.length > 30 ? src.substring(0, 30) + "…" : src;
-                }
-                const isLink = /^https?:\/\//.test(src);
-                return isLink ? (
-                  <a
-                    key={i}
-                    href={src}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-xs text-blue-600 bg-blue-50 hover:bg-blue-100 px-2 py-0.5 rounded-md transition"
-                  >
-                    <ExternalLink size={9} />
-                    {label}
-                  </a>
-                ) : (
-                  <span
-                    key={i}
-                    className="inline-flex items-center gap-1 text-xs text-gray-600 bg-gray-100 px-2 py-0.5 rounded-md"
-                  >
-                    <FileText size={9} />
-                    {label}
-                  </span>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
         {!isUser && message.confidence !== undefined && message.confidence > 0 && (
           <p className="text-xs text-gray-400 mt-2">
             Confidence: {(message.confidence * 100).toFixed(0)}%
@@ -2154,6 +2221,199 @@ function PSReIntegration({
         </div>
 
         <div className="h-8" />
+      </div>
+    </div>
+  );
+}
+
+// ─── Project Settings: Chatbot Behavior ─────────────────────────────────────
+
+function PSBehavior({ statusData, refreshStatus }) {
+  const { projectId } = useParams();
+  const [fallbackEnabled, setFallbackEnabled] = useState(true);
+  const [fallbackText, setFallbackText] = useState(
+    "I don't have that information in my knowledge base. Please contact support."
+  );
+  const [customFields, setCustomFields] = useState([]);
+  const [newField, setNewField] = useState("");
+  const [savingBehavior, setSavingBehavior] = useState(false);
+
+  useEffect(() => {
+    setFallbackEnabled(statusData?.fallback_response_enabled ?? true);
+    setFallbackText(
+      statusData?.fallback_response_text ||
+        "I don't have that information in my knowledge base. Please contact support."
+    );
+    setCustomFields(
+      Array.isArray(statusData?.custom_fallback_fields)
+        ? statusData.custom_fallback_fields.filter(
+            (f) => typeof f === "string" && f.trim()
+          )
+        : []
+    );
+  }, [statusData]);
+
+  const getToken = () => getSession()?.token || "";
+
+  const addCustomField = () => {
+    const field = newField.trim();
+    if (!field) return;
+    if (customFields.includes(field)) {
+      setNewField("");
+      return;
+    }
+    setCustomFields((prev) => [...prev, field]);
+    setNewField("");
+  };
+
+  const removeCustomField = (field) => {
+    setCustomFields((prev) => prev.filter((f) => f !== field));
+  };
+
+  const handleSaveBehavior = async () => {
+    setSavingBehavior(true);
+    try {
+      const res = await fetch(`${API}/console/settings/behavior/${projectId}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${getToken()}`,
+        },
+        body: JSON.stringify({
+          fallback_response_enabled: fallbackEnabled,
+          fallback_response_text: fallbackText.trim(),
+          custom_fallback_fields: customFields,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to save behavior settings");
+      toast.success("Chatbot behavior updated");
+      refreshStatus?.();
+    } catch (err) {
+      toast.error(err.message || "Failed to save behavior settings");
+    } finally {
+      setSavingBehavior(false);
+    }
+  };
+
+  return (
+    <div className="flex-1 overflow-y-auto p-6">
+      <div className="space-y-6">
+        <div>
+          <h2 className="text-xl font-bold text-charcoal">Chatbot Behavior</h2>
+          <p className="text-sm text-gray-500 mt-1">
+            Configure the fallback response and what contact details should be shown
+            when the chatbot cannot answer from the knowledge base.
+          </p>
+        </div>
+
+        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          <div className="px-6 py-4 border-b border-gray-100 bg-gray-50/50">
+            <h3 className="text-sm font-semibold text-charcoal flex items-center gap-2">
+              <Sparkles size={15} />
+              Fallback Configuration
+            </h3>
+          </div>
+
+          <div className="p-6 space-y-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-charcoal">Enable fallback response</p>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  When disabled, Gemini will generate a generic fallback message.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFallbackEnabled((v) => !v)}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                  fallbackEnabled ? "bg-crimson" : "bg-gray-300"
+                }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                    fallbackEnabled ? "translate-x-6" : "translate-x-1"
+                  }`}
+                />
+              </button>
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Fallback Message
+              </label>
+              <textarea
+                value={fallbackText}
+                onChange={(e) => setFallbackText(e.target.value)}
+                rows={4}
+                className="w-full mt-2 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crimson/20 focus:border-crimson/40 resize-none"
+                placeholder="I don't have that information in my knowledge base. Please contact support."
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Custom Contact Fields
+              </label>
+              <p className="text-xs text-gray-500 mt-1 mb-3">
+                Add values like Email, Contact Number, WhatsApp, or Support URL.
+              </p>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={newField}
+                  onChange={(e) => setNewField(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addCustomField();
+                    }
+                  }}
+                  className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crimson/20 focus:border-crimson/40"
+                  placeholder="support@example.com"
+                />
+                <button
+                  type="button"
+                  onClick={addCustomField}
+                  className="px-3 py-2 text-sm font-medium text-white bg-crimson rounded-lg hover:bg-rose-pink transition cursor-pointer"
+                >
+                  Add
+                </button>
+              </div>
+
+              {customFields.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {customFields.map((field) => (
+                    <span
+                      key={field}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs bg-blue-50 text-blue-700 border border-blue-200"
+                    >
+                      {field}
+                      <button
+                        type="button"
+                        onClick={() => removeCustomField(field)}
+                        className="text-blue-700 hover:text-blue-900"
+                      >
+                        <X size={12} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={handleSaveBehavior}
+              disabled={savingBehavior}
+              className="w-full px-4 py-2.5 text-sm font-medium text-white bg-crimson rounded-lg hover:bg-rose-pink transition disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
+            >
+              {savingBehavior ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+              Save Behavior Settings
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
