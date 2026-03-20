@@ -2,6 +2,17 @@
 
 A full-stack no-code chatbot builder that lets you design, train, and deploy AI-powered chatbots with a visual drag-and-drop interface. Integrates with LLMs (OpenAI, Claude, Gemini, Ollama) and supports Retrieval-Augmented Generation (RAG) for knowledge-base-powered answers. Embed your chatbot on any website with a single script tag.
 
+## New Features Introduced
+
+1. Supports Table creation and display on the test chat.
+2. Custom Fallback Message and links.
+
+## Preview
+
+| Test Chat (Table + Inline Sources) | Project Settings (Chatbot Behavior) |
+| ---------------------------------- | ----------------------------------- |
+| ![Test Chat Preview](images/image.png) | ![Chatbot Behavior Preview](images/image2.png) |
+
 ## Tech Stack
 
 | Layer     | Technology                                         |
