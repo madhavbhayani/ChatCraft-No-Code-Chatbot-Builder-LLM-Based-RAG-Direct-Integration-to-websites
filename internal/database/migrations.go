@@ -217,12 +217,6 @@ var migrations = []struct {
 			ALTER TABLE chunks ADD COLUMN IF NOT EXISTS word_count INT DEFAULT 0;
 		`,
 	},
-	{
-		Name: "017_add_embed_job_mode",
-		SQL: `
-			ALTER TABLE embed_jobs ADD COLUMN IF NOT EXISTS mode TEXT DEFAULT 'auto';
-		`,
-	},
 }
 
 // RunMigrations applies all pending migrations.

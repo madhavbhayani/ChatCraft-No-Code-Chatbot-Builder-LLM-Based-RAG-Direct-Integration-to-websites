@@ -899,28 +899,6 @@ func (h *BotBuilderHandler) GetEmbedPlan(w http.ResponseWriter, r *http.Request)
 	estimatedMinutes := math.Ceil(estimatedSeconds / 60)
 	totalDays := int(math.Ceil(float64(pendingChunks) / float64(embedRPD)))
 
-	// Check if there was a recent paused job (auto mode) for auto-resume info
-	var lastMode string
-	var lastStatus string
-	var lastErrorMsg *string
-	var lastFinishedAt *time.Time
-	_ = h.DB.Pool.QueryRow(r.Context(),
-		`SELECT COALESCE(mode,'auto'), status, error_message, finished_at FROM embed_jobs
-		 WHERE project_id = $1 ORDER BY started_at DESC LIMIT 1`, projectID,
-	).Scan(&lastMode, &lastStatus, &lastErrorMsg, &lastFinishedAt)
-
-	// Detect if quota was exhausted today — prevents auto-resume infinite loop
-	quotaExhaustedToday := false
-	if lastStatus == "paused" && lastFinishedAt != nil && lastErrorMsg != nil {
-		now := time.Now()
-		if lastFinishedAt.Year() == now.Year() && lastFinishedAt.YearDay() == now.YearDay() {
-			msg := strings.ToLower(*lastErrorMsg)
-			if strings.Contains(msg, "quota") || strings.Contains(msg, "daily limit") {
-				quotaExhaustedToday = true
-			}
-		}
-	}
-
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"pending_chunks":         pendingChunks,
@@ -930,9 +908,6 @@ func (h *BotBuilderHandler) GetEmbedPlan(w http.ResponseWriter, r *http.Request)
 		"total_days":             totalDays,
 		"rpm_limit":              embedRPM,
 		"rpd_limit":              embedRPD,
-		"last_job_mode":          lastMode,
-		"last_job_status":        lastStatus,
-		"quota_exhausted_today":  quotaExhaustedToday,
 	})
 }
 
@@ -1001,22 +976,12 @@ func (h *BotBuilderHandler) EmbedChunks(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Parse mode from request body (default "auto")
-	var body struct {
-		Mode string `json:"mode"`
-	}
-	json.NewDecoder(r.Body).Decode(&body)
-	mode := "auto"
-	if body.Mode == "manual" {
-		mode = "manual"
-	}
-
-	// Insert embed job with mode
+	// Insert embed job
 	jobID := uuid.New().String()
 	_, err = h.DB.Pool.Exec(r.Context(),
-		`INSERT INTO embed_jobs (id, project_id, status, total_chunks, mode, started_at)
-		 VALUES ($1, $2, 'queued', $3, $4, NOW())`,
-		jobID, projectID, pendingCount, mode,
+		`INSERT INTO embed_jobs (id, project_id, status, total_chunks, started_at)
+		 VALUES ($1, $2, 'queued', $3, NOW())`,
+		jobID, projectID, pendingCount,
 	)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to create embed job")
@@ -1033,7 +998,6 @@ func (h *BotBuilderHandler) EmbedChunks(w http.ResponseWriter, r *http.Request) 
 		"message": "Embedding job started",
 		"job_id":  jobID,
 		"total":   pendingCount,
-		"mode":    mode,
 	})
 }
 
@@ -1258,17 +1222,17 @@ func (h *BotBuilderHandler) GetEmbedJobStatus(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	var status, errorMessage, mode string
+	var status, errorMessage string
 	var totalChunks, embedded, failed int
 	var startedAt time.Time
 	var finishedAt *time.Time
 
 	err := h.DB.Pool.QueryRow(r.Context(),
 		`SELECT status, total_chunks, embedded, failed,
-		        COALESCE(error_message, ''), COALESCE(mode, 'auto'), started_at, finished_at
+		        COALESCE(error_message, ''), started_at, finished_at
 		 FROM embed_jobs WHERE id = $1`, jobID,
 	).Scan(&status, &totalChunks, &embedded, &failed,
-		&errorMessage, &mode, &startedAt, &finishedAt)
+		&errorMessage, &startedAt, &finishedAt)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "Embed job not found")
 		return
@@ -1280,7 +1244,6 @@ func (h *BotBuilderHandler) GetEmbedJobStatus(w http.ResponseWriter, r *http.Req
 		"total_chunks": totalChunks,
 		"embedded":     embedded,
 		"failed":       failed,
-		"mode":         mode,
 		"started_at":   startedAt,
 	}
 	if errorMessage != "" {

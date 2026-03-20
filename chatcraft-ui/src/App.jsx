@@ -39,6 +39,7 @@ function App() {
         <Route path="/console" element={<ConsoleRedirect />} />
         <Route path="/console/:projectId/*" element={<ConsolePage />} />
         <Route path="/console/integrate/:projectId" element={<IntegratePage />} />
+        <Route path="/console/integrate/:projectId/:stepSlug" element={<IntegratePage />} />
       </Routes>
     </BrowserRouter>
   );

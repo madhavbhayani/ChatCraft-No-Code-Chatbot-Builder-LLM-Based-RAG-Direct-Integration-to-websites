@@ -37,9 +37,21 @@ const STEPS = [
   { id: 3, title: "Generate Embeddings", desc: "Convert text chunks into vector embeddings", icon: Zap },
 ];
 
+const STEP_SLUG_BY_ID = {
+  1: "api_key",
+  2: "crawl_upload",
+  3: "embed",
+};
+
+const STEP_ID_BY_SLUG = {
+  api_key: 1,
+  crawl_upload: 2,
+  embed: 3,
+};
+
 export default function IntegratePage() {
   const navigate = useNavigate();
-  const { projectId } = useParams();
+  const { projectId, stepSlug } = useParams();
   const [currentStep, setCurrentStep] = useState(1);
   const [loading, setLoading] = useState(true);
   const [projectName, setProjectName] = useState("");
@@ -75,7 +87,6 @@ export default function IntegratePage() {
   const [embedJobId, setEmbedJobId] = useState(null);
   const [embedProgress, setEmbedProgress] = useState(null);
   const [embedPlan, setEmbedPlan] = useState(null);
-  const [embedMode, setEmbedMode] = useState(null); // "auto" | "manual"
   const [pausing, setPausing] = useState(false);
   const embedPollRef = useRef(null);
 
@@ -91,6 +102,14 @@ export default function IntegratePage() {
     const session = getSession();
     return session?.token || "";
   }, []);
+
+  const goToStep = useCallback(
+    (stepId, replace = false) => {
+      const slug = STEP_SLUG_BY_ID[stepId] || "api_key";
+      navigate(`/console/integrate/${projectId}/${slug}`, { replace });
+    },
+    [navigate, projectId]
+  );
 
   // Fetch setup status
   const fetchStatus = useCallback(async () => {
@@ -113,18 +132,6 @@ export default function IntegratePage() {
           setWebsiteUrl(data.website_urls.join(", "));
         } else if (data.website_url) {
           setWebsiteUrl(data.website_url);
-        }
-
-        // Set current step to next incomplete (or step 3 if pending chunks exist)
-        if (data.setup_step < 3) {
-          const pendingCount = data.pending_chunks ?? (data.chunk_count - data.embedded_count);
-          if (data.setup_step >= 2 && pendingCount > 0) {
-            setCurrentStep(3);
-          } else {
-            setCurrentStep(data.setup_step + 1);
-          }
-        } else {
-          setCurrentStep(3);
         }
 
         // Populate documents list for crawled pages display
@@ -150,7 +157,9 @@ export default function IntegratePage() {
         if (data.active_crawl_job_id) {
           setCrawlJobId(data.active_crawl_job_id);
           setCrawling(true);
-          setCurrentStep(2);
+          if (stepSlug !== "crawl_upload") {
+            goToStep(2, true);
+          }
           // Don't call startCrawlPolling here; it's done in a separate useEffect below
         }
 
@@ -158,7 +167,9 @@ export default function IntegratePage() {
         if (data.active_embed_job_id) {
           setEmbedJobId(data.active_embed_job_id);
           setEmbedding(true);
-          setCurrentStep(3);
+          if (stepSlug !== "embed") {
+            goToStep(3, true);
+          }
         }
 
         // Fetch embed plan for Step 3
@@ -171,13 +182,6 @@ export default function IntegratePage() {
             if (planRes.ok) {
               const plan = await planRes.json();
               setEmbedPlan(plan);
-
-              // Auto-resume: if last job was paused in "auto" mode and there are pending chunks
-              // BUT skip if quota was exhausted today (prevents infinite retry loop)
-              if (plan.last_job_status === "paused" && plan.last_job_mode === "auto" && plan.pending_chunks > 0 && !plan.quota_exhausted_today) {
-                // Auto-start new embed job
-                handleEmbedWithMode("auto");
-              }
             }
           } catch {}
         }
@@ -187,7 +191,16 @@ export default function IntegratePage() {
     } finally {
       setLoading(false);
     }
-  }, [projectId, getToken]);
+  }, [projectId, getToken, stepSlug, goToStep]);
+
+  useEffect(() => {
+    const stepId = STEP_ID_BY_SLUG[stepSlug];
+    if (!stepId) {
+      goToStep(1, true);
+      return;
+    }
+    setCurrentStep(stepId);
+  }, [stepSlug, goToStep]);
 
   useEffect(() => {
     if (!isLoggedIn()) {
@@ -204,14 +217,15 @@ export default function IntegratePage() {
         if (d.project) {
           setProjectName(d.project.name);
           if (d.project.id !== projectId) {
-            navigate(`/console/integrate/${d.project.id}`);
+            const slug = stepSlug && STEP_ID_BY_SLUG[stepSlug] ? stepSlug : "api_key";
+            navigate(`/console/integrate/${d.project.id}/${slug}`);
           }
         }
       })
       .catch(() => {});
 
     fetchStatus();
-  }, [navigate, projectId, fetchStatus]);
+  }, [navigate, projectId, fetchStatus, stepSlug]);
 
   // ---------- Crawl polling ----------
   const stopCrawlPolling = useCallback(() => {
@@ -488,7 +502,6 @@ export default function IntegratePage() {
         const data = await res.json();
         console.log("[embed-poll] Received:", data.status, "embedded:", data.embedded, "/", data.total_chunks);
         setEmbedProgress(data);
-        if (data.mode) setEmbedMode(data.mode);
 
         if (data.status === "done") {
           stopEmbedPolling();
@@ -523,27 +536,24 @@ export default function IntegratePage() {
     }
   }, [embedJobId, embedding, startEmbedPolling]);
 
-  // ---------- Step 3: Embed with mode ----------
-  const handleEmbedWithMode = async (mode) => {
+  // ---------- Step 3: Embed ----------
+  const handleEmbed = async () => {
     setEmbedding(true);
     setEmbedProgress(null);
-    setEmbedMode(mode);
     setPausing(false);
     try {
       const res = await fetch(`${API}/console/embed/${projectId}`, {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
           Authorization: `Bearer ${getToken()}`,
         },
-        body: JSON.stringify({ mode }),
       });
       const data = await res.json();
       if (!res.ok && res.status !== 202) throw new Error(data.error || "Embedding failed");
 
       if (data.job_id) {
         setEmbedJobId(data.job_id);
-        toast.success(mode === "auto" ? "Auto-embedding started! We'll handle everything." : "Embedding started! You can pause anytime.");
+        toast.success("Embedding started! You can pause anytime.");
         startEmbedPolling(data.job_id);
       } else {
         setEmbedStats(data);
@@ -620,7 +630,7 @@ export default function IntegratePage() {
                 return (
                   <div key={step.id}>
                     <button
-                      onClick={() => setCurrentStep(step.id)}
+                      onClick={() => goToStep(step.id)}
                       className={`w-full flex items-start gap-3 p-3 rounded-xl transition-all duration-200 text-left cursor-pointer
                         ${isActive ? "bg-crimson/5 border border-crimson/20" : "hover:bg-charcoal/3 border border-transparent"}
                       `}
@@ -731,7 +741,7 @@ export default function IntegratePage() {
 
                 {keyValidated && (
                   <button
-                    onClick={() => setCurrentStep(2)}
+                    onClick={() => goToStep(2)}
                     className="flex items-center gap-2 bg-crimson text-white px-6 py-2.5 rounded-lg font-semibold text-sm
                                hover:bg-rose-pink transition-all duration-200 cursor-pointer shadow-sm"
                   >
@@ -1165,7 +1175,7 @@ export default function IntegratePage() {
                         ))}
                     </div>
                     <button
-                      onClick={() => setCurrentStep(3)}
+                      onClick={() => goToStep(3)}
                       className="mt-4 flex items-center gap-2 bg-crimson text-white px-6 py-2.5 rounded-lg font-semibold text-sm
                                  hover:bg-rose-pink transition-all duration-200 cursor-pointer shadow-sm"
                     >
@@ -1231,7 +1241,7 @@ export default function IntegratePage() {
                 {/* Proceed to Embed */}
                 {(completedSteps.has(2) || crawledPages.length > 0 || uploadedFiles.length > 0) && !crawling && (
                   <button
-                    onClick={() => setCurrentStep(3)}
+                    onClick={() => goToStep(3)}
                     className="flex items-center gap-2 bg-crimson text-white px-6 py-2.5 rounded-lg font-semibold text-sm
                                hover:bg-rose-pink transition-all duration-200 cursor-pointer shadow-sm"
                   >
@@ -1325,48 +1335,15 @@ export default function IntegratePage() {
                           </p>
                         </div>
 
-                        {/* Two options */}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                          {/* Option 1: Auto mode */}
-                          <div className="border border-success/30 rounded-xl p-5 bg-success/5">
-                            <div className="flex items-center gap-2 mb-2">
-                              <Zap size={16} className="text-success" />
-                              <h4 className="text-sm font-bold text-charcoal">Automatic</h4>
-                            </div>
-                            <p className="text-xs text-muted mb-4 leading-relaxed">
-                              Embed all chunks automatically. Handles rate limits, pauses on daily quota, and auto-resumes next time you visit.
-                            </p>
-                            <button
-                              onClick={() => handleEmbedWithMode("auto")}
-                              disabled={embedding}
-                              className="w-full flex items-center justify-center gap-2 bg-success text-white px-4 py-2.5 rounded-lg font-semibold text-sm
-                                         hover:bg-success/80 transition-all duration-200 cursor-pointer shadow-sm disabled:opacity-50"
-                            >
-                              <Zap size={16} />
-                              Embed Automatically
-                            </button>
-                          </div>
-
-                          {/* Option 2: Manual mode */}
-                          <div className="border border-light-rose rounded-xl p-5 bg-white">
-                            <div className="flex items-center gap-2 mb-2">
-                              <Play size={16} className="text-crimson" />
-                              <h4 className="text-sm font-bold text-charcoal">Manual Control</h4>
-                            </div>
-                            <p className="text-xs text-muted mb-4 leading-relaxed">
-                              Start embedding and pause whenever you want. You control when to start and stop. Resume anytime.
-                            </p>
-                            <button
-                              onClick={() => handleEmbedWithMode("manual")}
-                              disabled={embedding}
-                              className="w-full flex items-center justify-center gap-2 bg-crimson text-white px-4 py-2.5 rounded-lg font-semibold text-sm
-                                         hover:bg-rose-pink transition-all duration-200 cursor-pointer shadow-sm disabled:opacity-50"
-                            >
-                              <Play size={16} />
-                              Start Manually
-                            </button>
-                          </div>
-                        </div>
+                        <button
+                          onClick={handleEmbed}
+                          disabled={embedding}
+                          className="w-full flex items-center justify-center gap-2 bg-crimson text-white px-4 py-2.5 rounded-lg font-semibold text-sm
+                                     hover:bg-rose-pink transition-all duration-200 cursor-pointer shadow-sm disabled:opacity-50"
+                        >
+                          <Play size={16} />
+                          Start Embedding
+                        </button>
                       </div>
                     )}
 
@@ -1398,11 +1375,6 @@ export default function IntegratePage() {
                                   {embedProgress.embedded} / {embedProgress.total_chunks} chunks embedded
                                   {embedProgress.failed > 0 && (
                                     <span className="text-crimson ml-2">({embedProgress.failed} failed)</span>
-                                  )}
-                                  {embedMode && (
-                                    <span className="ml-2 px-1.5 py-0.5 rounded-full bg-light-rose text-[10px] font-semibold uppercase">
-                                      {embedMode} mode
-                                    </span>
                                   )}
                                 </p>
                               )}
@@ -1474,7 +1446,7 @@ export default function IntegratePage() {
                           <span>{embedProgress.embedded} / {embedProgress.total_chunks} chunks embedded so far</span>
                         </div>
                         <button
-                          onClick={() => handleEmbedWithMode(embedMode || "auto")}
+                          onClick={handleEmbed}
                           disabled={embedding}
                           className="flex items-center gap-2 bg-crimson text-white px-5 py-2 rounded-lg font-semibold text-sm
                                      hover:bg-rose-pink transition-all duration-200 cursor-pointer shadow-sm disabled:opacity-50"

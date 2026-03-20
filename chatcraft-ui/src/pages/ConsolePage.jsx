@@ -91,6 +91,16 @@ export default function ConsolePage() {
   // Project Settings dropdown
   const [psOpen, setPsOpen] = useState(false);
 
+  const getIntegrateStepSlug = useCallback((status) => {
+    if (!status) return "api_key";
+    const pendingCount =
+      status.pending_chunks ?? (status.chunk_count - status.embedded_count);
+    if (status.setup_step >= 2 && pendingCount > 0) return "embed";
+    if (status.setup_step < 1) return "api_key";
+    if (status.setup_step < 2) return "crawl_upload";
+    return "embed";
+  }, []);
+
   const getToken = useCallback(() => {
     const session = getSession();
     return session?.token || "";
@@ -117,10 +127,17 @@ export default function ConsolePage() {
         if (statusRes.ok) {
           const status = await statusRes.json();
           setStatusData(status);
-          // If setup is not complete, redirect to the setup wizard
+          // Redirect incomplete setups only once per project for better UX.
           if (status.setup_step < 3) {
-            navigate(`/console/integrate/${projectId}`, { replace: true });
-            return;
+            const redirectKey = `chatcraft.setup.redirected.${projectId}`;
+            if (!localStorage.getItem(redirectKey)) {
+              localStorage.setItem(redirectKey, "1");
+              navigate(
+                `/console/integrate/${projectId}/${getIntegrateStepSlug(status)}`,
+                { replace: true }
+              );
+              return;
+            }
           }
         }
       } catch (err) {
@@ -130,7 +147,7 @@ export default function ConsolePage() {
       }
     };
     fetchData();
-  }, [navigate, projectId, getToken]);
+  }, [navigate, projectId, getToken, getIntegrateStepSlug]);
 
   // Sync model from status data
   useEffect(() => {
@@ -331,7 +348,7 @@ export default function ConsolePage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed");
       toast.success("Crawl job started! Go to Setup to monitor progress.");
-      navigate(`/console/integrate/${projectId}`);
+      navigate(`/console/integrate/${projectId}/crawl_upload`);
     } catch (err) {
       toast.error(err.message);
     }
@@ -346,7 +363,7 @@ export default function ConsolePage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed");
       toast.success("Embedding job started! Go to Setup to monitor.");
-      navigate(`/console/integrate/${projectId}`);
+      navigate(`/console/integrate/${projectId}/embed`);
     } catch (err) {
       toast.error(err.message);
     }
@@ -361,7 +378,7 @@ export default function ConsolePage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed");
       toast.success("Re-embedding all chunks! Go to Setup to monitor.");
-      navigate(`/console/integrate/${projectId}`);
+      navigate(`/console/integrate/${projectId}/embed`);
     } catch (err) {
       toast.error(err.message);
     }
@@ -571,7 +588,11 @@ export default function ConsolePage() {
 
         <div className="px-3 pb-4 space-y-1">
           <button
-            onClick={() => navigate(`/console/integrate/${projectId}`)}
+            onClick={() =>
+              navigate(
+                `/console/integrate/${projectId}/${getIntegrateStepSlug(statusData)}`
+              )
+            }
             className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs text-gray-500 hover:text-gray-300 hover:bg-white/5 transition cursor-pointer"
           >
             <Zap size={14} />

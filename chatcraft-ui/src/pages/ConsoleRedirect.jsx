@@ -5,7 +5,7 @@ import { getSession, isLoggedIn } from "../utils/auth";
 
 /**
  * ConsoleRedirect - When user visits /console, fetch their project
- * and redirect to /console/integrate/{projectId}.
+ * and redirect to /console/{projectId}.
  * If no project exists, redirect to /dashboard.
  */
 export default function ConsoleRedirect() {
