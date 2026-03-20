@@ -343,7 +343,7 @@ RULES:
 		response.Answer = "I'm having trouble generating a response right now. Please try again."
 		response.Fallback = true
 	} else {
-		response.Answer = stripSourcesSection(replaceSourceReferencesWithLinks(answer, sourceURLsByNumber))
+		response.Answer = stripSourcesSection(answer)
 	}
 
 	if response.Sources == nil {
