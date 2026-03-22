@@ -9,6 +9,7 @@ import (
 
 	"github.com/madhavbhayani/ChatCraft-No-Code-Chatbot-Builder-LLM-Based-RAG-Direct-Integration-to-websites/internal/database"
 	"github.com/madhavbhayani/ChatCraft-No-Code-Chatbot-Builder-LLM-Based-RAG-Direct-Integration-to-websites/internal/model"
+	"github.com/madhavbhayani/ChatCraft-No-Code-Chatbot-Builder-LLM-Based-RAG-Direct-Integration-to-websites/internal/service"
 
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
@@ -97,8 +98,13 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Use user ID as token (placeholder until JWT is implemented)
-	token := user.ID
+	// Issue JWT for authenticated session.
+	token, err := service.GenerateJWT(user.ID)
+	if err != nil {
+		log.Printf("[auth] jwt generate error: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to create session token")
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -144,8 +150,13 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Use user ID as token (placeholder until JWT is implemented)
-	token := user.ID
+	// Issue JWT for authenticated session.
+	token, err := service.GenerateJWT(user.ID)
+	if err != nil {
+		log.Printf("[auth] jwt generate error: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to create session token")
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(AuthResponse{

@@ -115,6 +115,7 @@ export default function IntegratePage() {
   const fetchStatus = useCallback(async () => {
     try {
       const res = await fetch(`${API}/console/status/${projectId}`, {
+        method: "POST",
         headers: { Authorization: `Bearer ${getToken()}` },
       });
       if (res.ok) {
@@ -177,6 +178,7 @@ export default function IntegratePage() {
         if (pendingForPlan > 0 && !data.active_embed_job_id) {
           try {
             const planRes = await fetch(`${API}/console/embed-plan/${projectId}`, {
+              method: "POST",
               headers: { Authorization: `Bearer ${getToken()}` },
             });
             if (planRes.ok) {
@@ -210,6 +212,7 @@ export default function IntegratePage() {
     // Fetch project name
     const session = getSession();
     fetch(`${API}/projects`, {
+      method: "POST",
       headers: { Authorization: `Bearer ${session?.token}` },
     })
       .then((r) => r.json())
@@ -241,6 +244,7 @@ export default function IntegratePage() {
     crawlPollRef.current = setInterval(async () => {
       try {
         const res = await fetch(`${API}/console/crawl-status/${jobId}`, {
+          method: "POST",
           headers: { Authorization: `Bearer ${getToken()}` },
         });
         if (!res.ok) {
@@ -493,6 +497,7 @@ export default function IntegratePage() {
     embedPollRef.current = setInterval(async () => {
       try {
         const res = await fetch(`${API}/console/embed-status/${jobId}`, {
+          method: "POST",
           headers: { Authorization: `Bearer ${getToken()}` },
         });
         if (!res.ok) {

@@ -15,6 +15,7 @@ import (
 
 	"github.com/madhavbhayani/ChatCraft-No-Code-Chatbot-Builder-LLM-Based-RAG-Direct-Integration-to-websites/internal/database"
 	"github.com/madhavbhayani/ChatCraft-No-Code-Chatbot-Builder-LLM-Based-RAG-Direct-Integration-to-websites/internal/model"
+	"github.com/madhavbhayani/ChatCraft-No-Code-Chatbot-Builder-LLM-Based-RAG-Direct-Integration-to-websites/internal/service"
 
 	firebase "firebase.google.com/go/v4"
 	"firebase.google.com/go/v4/auth"
@@ -176,8 +177,13 @@ func (h *GoogleHandler) GoogleAuth(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Use user ID as token (placeholder until JWT)
-	token := user.ID
+	// Issue JWT for authenticated session.
+	token, err := service.GenerateJWT(user.ID)
+	if err != nil {
+		log.Printf("[google-auth] jwt generate error: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to create session token")
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(AuthResponse{

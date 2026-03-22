@@ -119,9 +119,11 @@ export default function ConsolePage() {
       try {
         const [projRes, statusRes] = await Promise.all([
           fetch(`${API}/projects`, {
+            method: "POST",
             headers: { Authorization: `Bearer ${getToken()}` },
           }),
           fetch(`${API}/console/status/${projectId}`, {
+            method: "POST",
             headers: { Authorization: `Bearer ${getToken()}` },
           }),
         ]);
@@ -162,6 +164,7 @@ export default function ConsolePage() {
     setLoadingDocs(true);
     try {
       const res = await fetch(`${API}/console/documents/${projectId}`, {
+        method: "POST",
         headers: { Authorization: `Bearer ${getToken()}` },
       });
       if (res.ok) setDocuments((await res.json()).documents || []);
@@ -180,6 +183,7 @@ export default function ConsolePage() {
         let url = `${API}/console/chunks/${projectId}`;
         if (documentId) url += `?document_id=${documentId}`;
         const res = await fetch(url, {
+          method: "POST",
           headers: { Authorization: `Bearer ${getToken()}` },
         });
         if (res.ok) setChunks((await res.json()).chunks || []);
@@ -196,6 +200,7 @@ export default function ConsolePage() {
   const refreshStatus = useCallback(async () => {
     try {
       const res = await fetch(`${API}/console/status/${projectId}`, {
+        method: "POST",
         headers: { Authorization: `Bearer ${getToken()}` },
       });
       if (res.ok) setStatusData(await res.json());

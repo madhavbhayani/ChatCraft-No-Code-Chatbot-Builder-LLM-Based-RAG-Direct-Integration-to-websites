@@ -5,11 +5,10 @@ import (
 	"strings"
 
 	"github.com/madhavbhayani/ChatCraft-No-Code-Chatbot-Builder-LLM-Based-RAG-Direct-Integration-to-websites/internal/database"
+	"github.com/madhavbhayani/ChatCraft-No-Code-Chatbot-Builder-LLM-Based-RAG-Direct-Integration-to-websites/internal/service"
 )
 
-// Auth validates the Authorization header and injects X-User-ID into the request.
-// For now it looks up the user by the placeholder token approach (token = user-id).
-// TODO: Replace with real JWT validation.
+// Auth validates the Authorization JWT and injects X-User-ID into the request.
 func Auth(db *database.DB) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -25,12 +24,17 @@ func Auth(db *database.DB) func(http.Handler) http.Handler {
 				return
 			}
 
-			// Look up user by token (placeholder: token stored as user lookup)
-			// In production this would decode a JWT and extract the user ID.
-			var userID string
-			err := db.Pool.QueryRow(r.Context(),
-				"SELECT id FROM users WHERE id = $1", token,
-			).Scan(&userID)
+			userID, err := service.ValidateJWT(token)
+			if err != nil {
+				http.Error(w, `{"error":"Invalid or expired token"}`, http.StatusUnauthorized)
+				return
+			}
+
+			// Ensure user still exists.
+			var existsUserID string
+			err = db.Pool.QueryRow(r.Context(),
+				"SELECT id FROM users WHERE id = $1", userID,
+			).Scan(&existsUserID)
 			if err != nil {
 				http.Error(w, `{"error":"Invalid or expired token"}`, http.StatusUnauthorized)
 				return

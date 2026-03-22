@@ -337,6 +337,9 @@ function renderMarkdown(text) {
 
 function MessageBubble({ message }) {
   const isUser = message.role === "user";
+  const contentWithoutInlineSources = String(message.content || "")
+    .replace(/\s*\[Source\s+\d+\]/g, "")
+    .trim();
 
   return (
     <div className={`flex items-start gap-3 ${isUser ? "flex-row-reverse" : ""}`}>
@@ -373,13 +376,32 @@ function MessageBubble({ message }) {
           {isUser ? (
             <p className="whitespace-pre-wrap">{message.content}</p>
           ) : (
-            renderMarkdown(message.content)
+            renderMarkdown(contentWithoutInlineSources)
           )}
         </div>
         {!isUser && message.confidence !== undefined && message.confidence > 0 && (
           <p className="text-xs text-gray-400 mt-2">
             Confidence: {(message.confidence * 100).toFixed(0)}%
           </p>
+        )}
+        {!isUser && Array.isArray(message.sources) && message.sources.length > 0 && (
+          <div className="mt-2 pt-2 border-t border-gray-100">
+            <p className="text-xs text-gray-500 mb-1">Sources:</p>
+            <div className="flex flex-col gap-1">
+              {message.sources.map((source, idx) => (
+                <a
+                  key={`${source}-${idx}`}
+                  href={source}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-blue-600 hover:underline truncate"
+                  title={source}
+                >
+                  Source {idx + 1}
+                </a>
+              ))}
+            </div>
+          </div>
         )}
       </div>
     </div>

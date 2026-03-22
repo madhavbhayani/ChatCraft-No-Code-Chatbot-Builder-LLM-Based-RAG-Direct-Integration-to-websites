@@ -19,6 +19,7 @@ export default function ConsoleRedirect() {
 
     const session = getSession();
     fetch("/api/v1/projects", {
+      method: "POST",
       headers: { Authorization: `Bearer ${session?.token}` },
     })
       .then((r) => r.json())

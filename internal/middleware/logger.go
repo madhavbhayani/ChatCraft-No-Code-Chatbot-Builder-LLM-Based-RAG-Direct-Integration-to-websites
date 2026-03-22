@@ -4,12 +4,15 @@ import (
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/madhavbhayani/ChatCraft-No-Code-Chatbot-Builder-LLM-Based-RAG-Direct-Integration-to-websites/internal/metrics"
 )
 
 // Logger logs each incoming HTTP request.
 func Logger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+		metrics.IncRequests()
 
 		// Wrap response writer to capture status code
 		sw := &statusWriter{ResponseWriter: w, statusCode: http.StatusOK}

@@ -55,6 +55,7 @@ export default function DashboardPage() {
   const fetchProject = async (token) => {
     try {
       const res = await fetch("/api/v1/projects", {
+        method: "POST",
         headers: { Authorization: `Bearer ${token || getToken()}` },
       });
       const text = await res.text();
@@ -83,7 +84,7 @@ export default function DashboardPage() {
 
     setCreating(true);
     try {
-      const res = await fetch("/api/v1/projects", {
+      const res = await fetch("/api/v1/projects/create", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
