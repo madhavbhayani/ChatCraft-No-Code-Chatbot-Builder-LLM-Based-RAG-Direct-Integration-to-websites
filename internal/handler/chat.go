@@ -322,16 +322,22 @@ RULES:
 6. Use short paragraphs and bullet points for readability.
 7. Never invent facts, URLs, phone numbers, or prices not in the context.
 8. Do NOT add a separate "Sources" section at the end. Citations must stay inline.
-9. Use a markdown table ONLY when data is structured and comparable with at least 3 rows and at least 2 columns.
-10. A table must be meaningful and concise: max 5 rows and max 5 columns.
-11. If data exceeds table limits or is not naturally tabular, use normal text instead.`,
+9. If the user explicitly asks for a table/comparison, respond with a markdown table whenever the context allows.
+10. Use valid markdown table syntax with a header row, a separator row (---), and data rows.
+11. Use tables for structured/comparable data; otherwise use normal text.
+12. Keep tables concise (recommended max 5 columns, max 8 rows).`,
 			assistantName,
 		)
 	}
 
 	tableGuidance := `Formatting guidance:
 - Do not create tables for narrative text.
-- Create tables only for concise, comparable facts (e.g., pricing, plans, feature comparisons).
+- If user asks for a table or comparison, prefer table output.
+- Create tables for concise, comparable facts (e.g., pricing, plans, feature comparisons).
+- Always include the markdown separator row, for example:
+  | Column A | Column B |
+  | --- | --- |
+  | Value 1 | Value 2 |
 - Keep table content short and useful.`
 
 	fullSystemPrompt := sysPrompt + "\n\n" + tableGuidance + "\n\nContext:\n" + contextText

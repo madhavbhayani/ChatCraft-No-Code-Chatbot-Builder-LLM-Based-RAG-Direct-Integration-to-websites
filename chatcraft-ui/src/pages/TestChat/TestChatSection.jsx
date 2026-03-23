@@ -338,7 +338,7 @@ function renderMarkdown(text) {
 function MessageBubble({ message }) {
   const isUser = message.role === "user";
   const contentWithoutInlineSources = String(message.content || "")
-    .replace(/\s*\[Source\s+\d+\]/g, "")
+    .replace(/\s*\[\s*Source[^\]]*\]/gi, "")
     .trim();
 
   return (
@@ -387,14 +387,14 @@ function MessageBubble({ message }) {
         {!isUser && Array.isArray(message.sources) && message.sources.length > 0 && (
           <div className="mt-2 pt-2 border-t border-gray-100">
             <p className="text-xs text-gray-500 mb-1">Sources:</p>
-            <div className="flex flex-col gap-1">
+            <div className="flex flex-wrap items-center gap-2">
               {message.sources.map((source, idx) => (
                 <a
                   key={`${source}-${idx}`}
                   href={source}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-xs text-blue-600 hover:underline truncate"
+                  className="text-xs text-blue-600 hover:underline"
                   title={source}
                 >
                   Source {idx + 1}
