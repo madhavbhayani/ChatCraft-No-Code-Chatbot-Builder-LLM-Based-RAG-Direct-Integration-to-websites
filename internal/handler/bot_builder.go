@@ -894,7 +894,7 @@ func (h *BotBuilderHandler) GetEmbedPlan(w http.ResponseWriter, r *http.Request)
 	}
 	tomorrowChunks := pendingChunks - todayChunks
 
-	// 600ms per call → ~100 per minute
+	// One-by-one embedding with ~600ms spacing between requests.
 	estimatedSeconds := float64(todayChunks) * 0.65
 	estimatedMinutes := math.Ceil(estimatedSeconds / 60)
 	totalDays := int(math.Ceil(float64(pendingChunks) / float64(embedRPD)))
@@ -1001,6 +1001,110 @@ func (h *BotBuilderHandler) EmbedChunks(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+// ReEmbedChunks clears all embeddings and starts a fresh embedding job.
+// This is useful when you want to re-embed all chunks (e.g., after changing API key or model).
+func (h *BotBuilderHandler) ReEmbedChunks(w http.ResponseWriter, r *http.Request) {
+	userID := r.Header.Get("X-User-ID")
+	projectID := r.PathValue("project_id")
+	if projectID == "" {
+		writeError(w, http.StatusBadRequest, "Project ID is required")
+		return
+	}
+
+	// Verify ownership
+	var ownerID string
+	err := h.DB.Pool.QueryRow(r.Context(),
+		"SELECT user_id FROM projects WHERE id = $1", projectID,
+	).Scan(&ownerID)
+	if err != nil || ownerID != userID {
+		writeError(w, http.StatusForbidden, "Not your project")
+		return
+	}
+
+	// Get decrypted API key
+	var encryptedKey string
+	err = h.DB.Pool.QueryRow(r.Context(),
+		"SELECT gemini_api_key_encrypted FROM projects WHERE id = $1", projectID,
+	).Scan(&encryptedKey)
+	if err != nil || encryptedKey == "" {
+		writeError(w, http.StatusBadRequest, "Gemini API key not configured. Complete Step 1 first.")
+		return
+	}
+
+	apiKey, err := service.DecryptString(encryptedKey)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to decrypt API key")
+		return
+	}
+
+	// Clear all existing embeddings for this project
+	log.Printf("[re-embed] Clearing embeddings for project %s", projectID)
+	_, err = h.DB.Pool.Exec(r.Context(),
+		"UPDATE chunks SET embedding = NULL WHERE project_id = $1", projectID,
+	)
+	if err != nil {
+		log.Printf("[re-embed] ERROR clearing embeddings: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to clear embeddings")
+		return
+	}
+
+	// Check if there's already an active embed job for this project
+	var activeEmbedJobID string
+	err = h.DB.Pool.QueryRow(r.Context(),
+		"SELECT id FROM embed_jobs WHERE project_id = $1 AND status IN ('queued', 'running') ORDER BY started_at DESC LIMIT 1",
+		projectID,
+	).Scan(&activeEmbedJobID)
+	if err == nil && activeEmbedJobID != "" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"message": "Embed job already running",
+			"job_id":  activeEmbedJobID,
+		})
+		return
+	}
+
+	// Count all chunks (they all need re-embedding now)
+	var totalCount int
+	err = h.DB.Pool.QueryRow(r.Context(),
+		"SELECT COUNT(*) FROM chunks WHERE project_id = $1", projectID,
+	).Scan(&totalCount)
+	if err != nil || totalCount == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"message":  "No chunks to embed",
+			"embedded": 0,
+		})
+		return
+	}
+
+	// Insert embed job
+	jobID := uuid.New().String()
+	_, err = h.DB.Pool.Exec(r.Context(),
+		`INSERT INTO embed_jobs (id, project_id, status, total_chunks, started_at)
+		 VALUES ($1, $2, 'queued', $3, NOW())`,
+		jobID, projectID, totalCount,
+	)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to create embed job")
+		return
+	}
+
+	log.Printf("[re-embed] Starting fresh embedding job for project %s: %d chunks", projectID, totalCount)
+
+	// Launch background goroutine
+	go h.runEmbedJob(jobID, projectID, apiKey)
+
+	// Return 202 Accepted
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Re-embedding job started (all previous embeddings cleared)",
+		"job_id":  jobID,
+		"total":   totalCount,
+	})
+}
+
 // PauseEmbedJob signals a running embed job to pause.
 func (h *BotBuilderHandler) PauseEmbedJob(w http.ResponseWriter, r *http.Request) {
 	jobID := r.PathValue("job_id")
@@ -1067,14 +1171,14 @@ func (h *BotBuilderHandler) flushEmbedBatch(ctx context.Context, batch *pgx.Batc
 	return &pgx.Batch{}
 }
 
-// runEmbedJob embeds all pending chunks in the background.
+// runEmbedJob embeds pending chunks one-by-one.
 // Rate limits: 600ms between calls (RPM=100), 60s wait on 429, pause on daily quota (RPD=1000).
-// Progress flushed every 30 seconds (or immediately on quota/pause).
+// Progress is flushed every 10 seconds (or immediately on pause/quota/end).
 func (h *BotBuilderHandler) runEmbedJob(jobID, projectID, apiKey string) {
 	ctx := context.Background()
 
 	// Mark job as running
-	log.Printf("[embed-job] %s starting", jobID)
+	log.Printf("[embed-job] %s starting (one-by-one mode)", jobID)
 	h.DB.Pool.Exec(ctx, "UPDATE embed_jobs SET status = 'running' WHERE id = $1", jobID)
 
 	// Fetch all chunks without embeddings
@@ -1134,12 +1238,12 @@ func (h *BotBuilderHandler) runEmbedJob(jobID, projectID, apiKey string) {
 			return
 		}
 
-		// Rate-limit: 600ms between API calls (RPM=100)
+		// Rate-limit: 600ms between API calls (100 RPM free-tier safety).
 		if i > 0 {
 			time.Sleep(600 * time.Millisecond)
 		}
 
-		// Embed with retry on 429 (wait 60s per attempt)
+		// Embed single chunk with retry on 429 (wait 60s per attempt).
 		var embedding []float32
 		var embedErr error
 		maxRetries := 3
@@ -1152,10 +1256,14 @@ func (h *BotBuilderHandler) runEmbedJob(jobID, projectID, apiKey string) {
 
 			errMsg := embedErr.Error()
 
-			// RESOURCE_EXHAUSTED = daily quota hit → pause
+			// RESOURCE_EXHAUSTED = daily quota hit → pause job with user-friendly message
 			if strings.Contains(errMsg, "RESOURCE_EXHAUSTED") || strings.Contains(errMsg, "quota") {
-				log.Printf("[embed-job] Daily quota exhausted at chunk %d/%d", i+1, len(pendingChunks))
-				pauseJob(fmt.Sprintf("Daily quota reached after %d/%d chunks. Remaining chunks will embed when you resume.", embedded, len(pendingChunks)))
+				// Log full technical error to terminal for debugging
+				log.Printf("[embed-job] ⚠️  QUOTA EXHAUSTED - Full error details:\n%v", embedErr)
+				log.Printf("[embed-job] Daily quota reached at chunk %d/%d", i+1, len(pendingChunks))
+
+				userMessage := fmt.Sprintf("Daily quota reached after %d/%d chunks. Remaining chunks will embed when you resume.", embedded, len(pendingChunks))
+				pauseJob(userMessage)
 				return
 			}
 
@@ -1171,7 +1279,8 @@ func (h *BotBuilderHandler) runEmbedJob(jobID, projectID, apiKey string) {
 		}
 
 		if embedErr != nil {
-			log.Printf("[embed-job] error for chunk %s: %v", chunk.ID, embedErr)
+			// Log technical error to terminal, but don't expose to frontend
+			log.Printf("[embed-job] ❌ Embedding error for chunk %s: %v", chunk.ID, embedErr)
 			failed++
 		} else {
 			vec := pgvector.NewVector(embedding)
@@ -1179,10 +1288,11 @@ func (h *BotBuilderHandler) runEmbedJob(jobID, projectID, apiKey string) {
 			embedded++
 		}
 
-		// Flush batch every 30 seconds or on last chunk
-		if time.Since(lastFlush) >= 30*time.Second || i == len(pendingChunks)-1 {
+		// Flush DB updates every 10 seconds or on last chunk.
+		if time.Since(lastFlush) >= 10*time.Second || i == len(pendingChunks)-1 {
 			embedBatch = h.flushEmbedBatch(ctx, embedBatch, jobID, &embedded, &failed)
 			lastFlush = time.Now()
+			log.Printf("[embed-job] progress: %d/%d embedded, %d failed", embedded, len(pendingChunks), failed)
 		}
 	}
 

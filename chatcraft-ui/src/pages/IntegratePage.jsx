@@ -1307,6 +1307,22 @@ export default function IntegratePage() {
                         <div className="flex items-center gap-2 mb-1">
                           <Calendar size={16} className="text-crimson" />
                           <h4 className="text-sm font-bold text-charcoal">Embedding Plan</h4>
+                          <div className="relative group">
+                            <button
+                              type="button"
+                              className="w-5 h-5 rounded-full border border-light-rose text-muted flex items-center justify-center hover:bg-light-rose/40 transition-colors"
+                              aria-label="How plan is calculated"
+                            >
+                              <Info size={12} />
+                            </button>
+                            <div className="absolute left-6 top-0 z-20 hidden group-hover:block w-72 p-3 rounded-lg bg-charcoal text-white text-xs leading-relaxed shadow-lg">
+                              Plan is estimated using Gemini free-tier assumptions.
+                              <br />
+                              Formula: today chunks = min(pending, RPD limit), estimated minutes = (today chunks x 0.65s) / 60.
+                              <br />
+                              Values: RPM {embedPlan.rpm_limit}, RPD {embedPlan.rpd_limit}.
+                            </div>
+                          </div>
                         </div>
 
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -1327,18 +1343,11 @@ export default function IntegratePage() {
                             <p className="text-[10px] text-muted">Est. Today</p>
                           </div>
                         </div>
-
-                        {/* Rate limit info */}
-                        <div className="flex items-start gap-2 p-3 rounded-lg bg-light-rose/30 border border-light-rose">
-                          <Info size={14} className="text-muted shrink-0 mt-0.5" />
-                          <p className="text-xs text-charcoal/70 leading-relaxed">
-                            Gemini free tier allows <span className="font-semibold">{embedPlan.rpm_limit} requests/min</span> and{" "}
-                            <span className="font-semibold">{embedPlan.rpd_limit} requests/day</span>.
-                            {embedPlan.total_days > 1 && (
-                              <span> This will take <span className="font-semibold text-crimson">{embedPlan.total_days} days</span> to complete all chunks.</span>
-                            )}
-                          </p>
-                        </div>
+                        {embedPlan.total_days > 1 && (
+                          <div className="text-xs text-muted">
+                            Estimated completion window: <span className="font-semibold text-charcoal">{embedPlan.total_days} day(s)</span>
+                          </div>
+                        )}
 
                         <button
                           onClick={handleEmbed}
@@ -1429,10 +1438,10 @@ export default function IntegratePage() {
                           </div>
                         )}
 
-                        {/* Rate limit info during embedding */}
+                        {/* Embedding info during embedding */}
                         <div className="flex items-center gap-2 text-xs text-muted">
                           <Clock size={12} />
-                          <span>Rate limited to {embedPlan?.rpm_limit || 100} requests/min • Progress updates every 30s</span>
+                          <span>Progress updates every 10s</span>
                         </div>
                       </div>
                     )}

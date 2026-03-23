@@ -20,9 +20,9 @@ func Connect(databaseURL string) (*DB, error) {
 		return nil, fmt.Errorf("failed to parse database URL: %w", err)
 	}
 
-	// Connection pool settings
-	config.MaxConns = 10
-	config.MinConns = 2
+	// Connection pool settings — optimized for concurrent jobs
+	config.MaxConns = 20 // Supports more concurrent embedding/crawl jobs
+	config.MinConns = 5  // Maintain minimum idle connections
 	config.MaxConnLifetime = 30 * time.Minute
 	config.MaxConnIdleTime = 5 * time.Minute
 
