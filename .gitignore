@@ -2,7 +2,6 @@
 .env
 firebase-admin-sdk.json
 # Go
-go.sum
 *.exe
 *.exe~
 *.dll
