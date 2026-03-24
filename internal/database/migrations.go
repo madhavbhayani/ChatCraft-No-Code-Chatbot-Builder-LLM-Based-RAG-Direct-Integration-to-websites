@@ -225,6 +225,22 @@ var migrations = []struct {
 			ALTER TABLE projects ADD COLUMN IF NOT EXISTS custom_fallback_fields JSONB DEFAULT '[]';
 		`,
 	},
+	{
+		Name: "018_create_bot_customizations",
+		SQL: `
+			CREATE TABLE IF NOT EXISTS bot_customizations (
+				id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+				project_id     UUID NOT NULL UNIQUE REFERENCES projects(id) ON DELETE CASCADE,
+				icon_url       TEXT DEFAULT '',
+				theme_color    VARCHAR(20) NOT NULL DEFAULT '#DC2626',
+				font_family    VARCHAR(120) NOT NULL DEFAULT 'Roboto',
+				icon_source    VARCHAR(20) NOT NULL DEFAULT 'none',
+				created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+				updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+			);
+			CREATE INDEX IF NOT EXISTS idx_bot_customizations_project_id ON bot_customizations(project_id);
+		`,
+	},
 }
 
 // RunMigrations applies all pending migrations.

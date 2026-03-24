@@ -9,8 +9,11 @@ import (
 
 // Config holds all application configuration.
 type Config struct {
-	Port        string
-	DatabaseURL string
+	Port                 string
+	DatabaseURL          string
+	ImagekitPrivateKey   string
+	ImagekitPublicKey    string
+	ImagekitUploadFolder string
 }
 
 // Load reads environment variables and returns a Config.
@@ -30,7 +33,10 @@ func Load() (*Config, error) {
 	}
 
 	return &Config{
-		Port:        port,
-		DatabaseURL: dbURL,
+		Port:                 port,
+		DatabaseURL:          dbURL,
+		ImagekitPrivateKey:   os.Getenv("IMAGEKIT_PRIVATE_KEY"),
+		ImagekitPublicKey:    os.Getenv("IMAGEKIT_PUBLIC_KEY"),
+		ImagekitUploadFolder: os.Getenv("IMAGEKIT_UPLOAD_FOLDER"),
 	}, nil
 }

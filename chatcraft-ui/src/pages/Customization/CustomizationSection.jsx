@@ -1,136 +1,31 @@
 import { useEffect, useMemo, useState } from "react";
-import { Palette, Type, Bot, Check, Upload, Search } from "lucide-react";
+import { useParams } from "react-router-dom";
+import { Palette, Type, Bot, Check, Upload, Search, Save } from "lucide-react";
+import { toast } from "sonner";
+import { getSession } from "../../utils/auth";
 
+const API = "/api/v1";
 const DEFAULT_THEME_COLOR = "#DC2626";
 
 const GOOGLE_FONTS = [
-    "Alegreya",
-    "Almarai",
-    "Amiri",
-    "Archivo",
-    "Arvo",
-    "Asap",
-    "Asap Condensed",
-    "Assistant",
-    "Atkinson Hyperlegible",
-    "Barlow",
-    "Barlow Condensed",
-    "Barlow Semi Condensed",
-    "Baskervville",
-    "Bigelow Rules",
-    "Bitter",
-    "Bodoni Moda",
-    "Bona Nova",
-    "Bungee",
-    "Cabin",
-    "Cairo",
-    "Cardo",
-    "Caveat",
-    "Chakra Petch",
-    "Comfortaa",
-    "Cormorant",
-    "Courier Prime",
-    "Crimson Text",
-    "DM Sans",
-    "Domine",
-    "Dosis",
-    "EB Garamond",
-    "Enriqueta",
-    "Familjen Grotesk",
-    "Fontdiner Swanky",
-    "Fredoka",
-    "Freckle Face",
-    "Fresca",
-    "Fugaz One",
-    "IBM Plex Arabic",
-    "IBM Plex Mono",
-    "IBM Plex Sans",
-    "IM Fell DW Pica",
-    "Inconsolata",
-    "Indie Flower",
-    "Inter",
-    "JetBrains Mono",
-    "Josefin Sans",
-    "Jost",
-    "Kanit",
-    "Laila",
-    "Lato",
-    "Ledger",
-    "Lexend",
-    "Libre Baskerville",
-    "Libre Franklin",
-    "Lora",
-    "Manrope",
-    "Merriweather",
-    "Mitr",
-    "Montserrat",
-    "Mulish",
-    "Niramit",
-    "Noto Sans",
-    "Noto Sans Arabic",
-    "Noto Sans Thai",
-    "Noto Serif",
-    "Nunito",
-    "Open Sans",
-    "Oswald",
-    "Outfit",
-    "Overpass",
-    "Overpass Mono",
-    "Oxygen",
-    "Pacifico",
-    "Pattaya",
-    "Playfair Display",
-    "Playfair Display SC",
-    "Plus Jakarta Sans",
-    "Poppins",
-    "Proza Libre",
-    "PT Sans",
-    "Quattrocento",
-    "Quattrocento Sans",
-    "Quicksand",
-    "Radley",
-    "Raleway",
-    "Righteous",
-    "Roboto",
-    "Roboto Mono",
-    "Ropa Sans",
-    "Rubik",
-    "Sora",
-    "Source Code Pro",
-    "Source Sans 3",
-    "Space Grotesk",
-    "Space Mono",
-    "Syne",
-    "Teko",
-    "Titillium Web",
-    "Ubuntu",
-    "Unbounded",
-    "Urbanist",
-    "Varela Round",
-    "Work Sans",
-    "Yantramanav",
-    "Zilla Slab",
-    "Aleo",
-    "Aref Ruqaa",
-    "Bai Jamjuree",
-    "Bebas Neue",
-    "Carter One",
-    "Catamaran",
-    "Chivo",
-    "Exo 2",
-    "Fira Sans",
-    "Hind",
-    "Hind Madurai",
-    "Karla",
-    "Lobster",
-    "Maven Pro",
-    "Mukta",
-    "Noto Kufi Arabic",
-    "Noto Naskh Arabic",
-    "Prompt",
-    "Rajdhani",
-    "Rubik Mono One",
-    "Signika",
+  "Alegreya", "Almarai", "Amiri", "Archivo", "Arvo", "Asap", "Asap Condensed", "Assistant",
+  "Atkinson Hyperlegible", "Barlow", "Barlow Condensed", "Barlow Semi Condensed", "Baskervville",
+  "Bigelow Rules", "Bitter", "Bodoni Moda", "Bona Nova", "Bungee", "Cabin", "Cairo", "Cardo",
+  "Caveat", "Chakra Petch", "Comfortaa", "Cormorant", "Courier Prime", "Crimson Text", "DM Sans",
+  "Domine", "Dosis", "EB Garamond", "Enriqueta", "Familjen Grotesk", "Fontdiner Swanky", "Fredoka",
+  "Freckle Face", "Fresca", "Fugaz One", "IBM Plex Arabic", "IBM Plex Mono", "IBM Plex Sans",
+  "IM Fell DW Pica", "Inconsolata", "Indie Flower", "Inter", "JetBrains Mono", "Josefin Sans", "Jost",
+  "Kanit", "Laila", "Lato", "Ledger", "Lexend", "Libre Baskerville", "Libre Franklin", "Lora",
+  "Manrope", "Merriweather", "Mitr", "Montserrat", "Mulish", "Niramit", "Noto Sans",
+  "Noto Sans Arabic", "Noto Sans Thai", "Noto Serif", "Nunito", "Open Sans", "Oswald", "Outfit",
+  "Overpass", "Overpass Mono", "Oxygen", "Pacifico", "Pattaya", "Playfair Display", "Playfair Display SC",
+  "Plus Jakarta Sans", "Poppins", "Proza Libre", "PT Sans", "Quattrocento", "Quattrocento Sans",
+  "Quicksand", "Radley", "Raleway", "Righteous", "Roboto", "Roboto Mono", "Ropa Sans", "Rubik",
+  "Sora", "Source Code Pro", "Source Sans 3", "Space Grotesk", "Space Mono", "Syne", "Teko",
+  "Titillium Web", "Ubuntu", "Unbounded", "Urbanist", "Varela Round", "Work Sans", "Yantramanav",
+  "Zilla Slab", "Aleo", "Aref Ruqaa", "Bai Jamjuree", "Bebas Neue", "Carter One", "Catamaran",
+  "Chivo", "Exo 2", "Fira Sans", "Hind", "Hind Madurai", "Karla", "Lobster", "Maven Pro", "Mukta",
+  "Noto Kufi Arabic", "Noto Naskh Arabic", "Prompt", "Rajdhani", "Rubik Mono One", "Signika",
 ].sort();
 
 const SUPPORTED_FORMATS = ["jpeg", "jpg", "png", "svg", "webp"];
@@ -139,14 +34,10 @@ const loadedFonts = new Set();
 
 function loadGoogleFont(fontName) {
   if (!fontName || loadedFonts.has(fontName) || typeof document === "undefined") return;
-
   const family = encodeURIComponent(fontName).replace(/%20/g, "+");
-  const href = `https://fonts.googleapis.com/css2?family=${family}:wght@400;500;600&display=swap`;
-
   const link = document.createElement("link");
   link.rel = "stylesheet";
-  link.href = href;
-  link.setAttribute("data-font-family", fontName);
+  link.href = `https://fonts.googleapis.com/css2?family=${family}:wght@400;500;600&display=swap`;
   document.head.appendChild(link);
   loadedFonts.add(fontName);
 }
@@ -163,19 +54,15 @@ function hexToRgbString(hex) {
 function rgbStringToHex(value) {
   const match = value.match(/^\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*$/);
   if (!match) return "";
-
   const r = Number(match[1]);
   const g = Number(match[2]);
   const b = Number(match[3]);
-
   if ([r, g, b].some((v) => Number.isNaN(v) || v < 0 || v > 255)) return "";
   return `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("").toUpperCase()}`;
 }
 
-function IconGallery({ onIconSelect }) {
-  const [uploadError, setUploadError] = useState("");
-  const [uploadedIcon, setUploadedIcon] = useState(null);
-  const [selectedIconKey, setSelectedIconKey] = useState("");
+function IconGallery({ selectedIcon, setSelectedIcon, uploadedFile, setUploadedFile, uploadingError, setUploadingError }) {
+  const [previewUrl, setPreviewUrl] = useState("");
 
   const iconModules = useMemo(
     () => import.meta.glob("../../assets/customization_icons/*.{png,jpg,jpeg,webp,svg}", { eager: true }),
@@ -188,34 +75,34 @@ function IconGallery({ onIconSelect }) {
     name: path.split("/").pop()?.replace(/\.[^/.]+$/, "") || "icon",
   }));
 
+  useEffect(() => {
+    if (!uploadedFile) {
+      setPreviewUrl("");
+      return undefined;
+    }
+    const objectUrl = URL.createObjectURL(uploadedFile);
+    setPreviewUrl(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [uploadedFile]);
+
   const handleFileUpload = (event) => {
     const file = event.target.files?.[0];
-    setUploadError("");
+    setUploadingError("");
     if (!file) return;
 
     const extension = file.name.split(".").pop()?.toLowerCase() || "";
     if (!SUPPORTED_FORMATS.includes(extension)) {
-      setUploadError("Unsupported format. Use: jpeg, jpg, png, svg, webp.");
+      setUploadingError("Unsupported format. Use: jpeg, jpg, png, svg, webp.");
       return;
     }
-
     if (file.size > MAX_FILE_SIZE) {
-      setUploadError(`File too large: ${(file.size / 1024).toFixed(1)}KB. Max 250KB.`);
+      setUploadingError(`File too large: ${(file.size / 1024).toFixed(1)}KB. Max 250KB.`);
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = (loadEvent) => {
-      const uploaded = {
-        key: "uploaded",
-        src: String(loadEvent.target?.result || ""),
-        name: file.name.replace(/\.[^/.]+$/, ""),
-      };
-      setUploadedIcon(uploaded);
-      setSelectedIconKey(uploaded.key);
-      onIconSelect?.(uploaded.src);
-    };
-    reader.readAsDataURL(file);
+    // One icon only: latest selection replaces prior upload.
+    setUploadedFile(file);
+    setSelectedIcon({ source: "uploaded", url: "", name: file.name });
   };
 
   return (
@@ -223,7 +110,7 @@ function IconGallery({ onIconSelect }) {
       <div className="flex flex-wrap items-start gap-2">
         <label
           className={`relative cursor-pointer border-2 border-dashed rounded-lg bg-gray-50 p-2 transition hover:border-crimson/40 hover:bg-gray-100 ${
-            selectedIconKey === "uploaded" ? "border-crimson bg-crimson/5" : "border-gray-300"
+            selectedIcon?.source === "uploaded" ? "border-crimson bg-crimson/5" : "border-gray-300"
           }`}
           title="Upload icon"
         >
@@ -244,11 +131,13 @@ function IconGallery({ onIconSelect }) {
             key={icon.key}
             type="button"
             onClick={() => {
-              setSelectedIconKey(icon.key);
-              onIconSelect?.(icon.src);
+              setUploadedFile(null);
+              setSelectedIcon({ source: "predefined", url: icon.src, name: icon.name });
             }}
             className={`border rounded-lg bg-white p-2 transition hover:border-crimson/40 hover:shadow-sm ${
-              selectedIconKey === icon.key ? "border-crimson bg-crimson/5" : "border-gray-200"
+              selectedIcon?.source === "predefined" && selectedIcon?.url === icon.src
+                ? "border-crimson bg-crimson/5"
+                : "border-gray-200"
             }`}
             title={icon.name}
           >
@@ -256,27 +145,20 @@ function IconGallery({ onIconSelect }) {
           </button>
         ))}
 
-        {uploadedIcon && (
+        {selectedIcon?.source === "uploaded" && previewUrl && (
           <button
             type="button"
-            onClick={() => {
-              setSelectedIconKey(uploadedIcon.key);
-              onIconSelect?.(uploadedIcon.src);
-            }}
-            className={`border rounded-lg bg-white p-2 transition hover:border-crimson/40 hover:shadow-sm ${
-              selectedIconKey === uploadedIcon.key ? "border-crimson bg-crimson/5" : "border-gray-200"
-            }`}
-            title={uploadedIcon.name}
+            onClick={() => setSelectedIcon({ source: "uploaded", url: "", name: uploadedFile?.name || "Uploaded" })}
+            className="border border-crimson bg-crimson/5 rounded-lg p-2"
+            title={selectedIcon?.name || "Uploaded icon"}
           >
-            <img src={uploadedIcon.src} alt={uploadedIcon.name} className="w-12 h-12 object-contain" />
+            <img src={previewUrl} alt={selectedIcon?.name || "uploaded-icon"} className="w-12 h-12 object-contain" />
           </button>
         )}
       </div>
 
-      <p className="text-xs text-gray-500 mt-2">
-        Supported: JPEG, JPG, PNG, SVG, WEBP. Max size: 250KB.
-      </p>
-      {uploadError && <p className="text-xs text-crimson mt-1">{uploadError}</p>}
+      <p className="text-xs text-gray-500 mt-2">Supported: JPEG, JPG, PNG, SVG, WEBP. Max size: 250KB.</p>
+      {uploadingError ? <p className="text-xs text-crimson mt-1">{uploadingError}</p> : null}
     </div>
   );
 }
@@ -295,7 +177,6 @@ function FontSelector({ value, onChange }) {
 
   useEffect(() => {
     if (!open) return;
-    // Preload fonts visible in the current filtered list for accurate preview styles.
     filtered.slice(0, 40).forEach((font) => loadGoogleFont(font));
   }, [open, filtered]);
 
@@ -310,7 +191,7 @@ function FontSelector({ value, onChange }) {
         <Search size={14} className="text-gray-400" />
       </button>
 
-      {open && (
+      {open ? (
         <div className="mt-2 bg-white border border-gray-200 rounded-lg shadow-lg z-[120] relative">
           <div className="p-3 border-b border-gray-100">
             <input
@@ -340,7 +221,7 @@ function FontSelector({ value, onChange }) {
                   style={{ fontFamily: font }}
                 >
                   {font}
-                  {value === font && <Check size={14} className="float-right mt-0.5" />}
+                  {value === font ? <Check size={14} className="float-right mt-0.5" /> : null}
                 </button>
               ))
             ) : (
@@ -348,19 +229,67 @@ function FontSelector({ value, onChange }) {
             )}
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
 
 export default function CustomizationSection() {
-  const [selectedIcon, setSelectedIcon] = useState(null);
+  const { projectId } = useParams();
+
+  const [selectedIcon, setSelectedIcon] = useState({ source: "none", url: "", name: "" });
+  const [uploadedFile, setUploadedFile] = useState(null);
+  const [uploadingError, setUploadingError] = useState("");
+
   const [themeColor, setThemeColor] = useState(DEFAULT_THEME_COLOR);
   const [hexValue, setHexValue] = useState(DEFAULT_THEME_COLOR);
   const [rgbValue, setRgbValue] = useState(hexToRgbString(DEFAULT_THEME_COLOR));
   const [hexError, setHexError] = useState("");
   const [rgbError, setRgbError] = useState("");
   const [fontFamily, setFontFamily] = useState("Roboto");
+
+  const [saving, setSaving] = useState(false);
+  const [loadingSettings, setLoadingSettings] = useState(true);
+
+  const token = getSession()?.token || "";
+
+  useEffect(() => {
+    if (!projectId || !token) {
+      setLoadingSettings(false);
+      return;
+    }
+
+    const fetchCustomization = async () => {
+      try {
+        const res = await fetch(`${API}/console/customization/${projectId}`, {
+          method: "GET",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) {
+          throw new Error("Failed to load customization");
+        }
+        const data = await res.json();
+        if (data.theme_color) {
+          setThemeColor(data.theme_color);
+          setHexValue(data.theme_color);
+          const rgb = hexToRgbString(data.theme_color);
+          if (rgb) setRgbValue(rgb);
+        }
+        if (data.font_family) {
+          setFontFamily(data.font_family);
+        }
+        if (data.icon_url) {
+          setSelectedIcon({ source: data.icon_source || "uploaded", url: data.icon_url, name: "saved" });
+        }
+      } catch (err) {
+        // Non-blocking load failure
+      } finally {
+        setLoadingSettings(false);
+      }
+    };
+
+    fetchCustomization();
+  }, [projectId, token]);
 
   const handleColorPicker = (hex) => {
     const upperHex = hex.toUpperCase();
@@ -401,12 +330,81 @@ export default function CustomizationSection() {
     setHexValue(hex);
   };
 
+  const handleSave = async () => {
+    if (!projectId) {
+      toast.error("Project ID not found");
+      return;
+    }
+    if (!token) {
+      toast.error("Session expired. Please log in again.");
+      return;
+    }
+    if (hexError || rgbError || uploadingError) {
+      toast.error("Fix validation errors before saving");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const formData = new FormData();
+      formData.append("theme_color", themeColor);
+      formData.append("font_family", fontFamily);
+      formData.append("icon_source", selectedIcon?.source || "none");
+
+      if (selectedIcon?.source === "predefined" && selectedIcon?.url) {
+        formData.append("selected_icon_url", selectedIcon.url);
+      }
+
+      // Upload happens only when Save is clicked.
+      if (selectedIcon?.source === "uploaded") {
+        if (!uploadedFile) {
+          toast.error("Please select one icon file before saving");
+          setSaving(false);
+          return;
+        }
+        formData.append("icon_file", uploadedFile);
+      }
+
+      const res = await fetch(`${API}/console/customization/${projectId}`, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(payload?.error || payload?.message || "Failed to save customization");
+      }
+
+      if (payload?.icon_url) {
+        setSelectedIcon((prev) => ({ ...prev, url: payload.icon_url, source: payload.icon_source || prev.source }));
+      }
+
+      toast.success("Customization saved successfully");
+    } catch (err) {
+      toast.error(err.message || "Failed to save customization");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="flex-1 overflow-y-auto p-6">
       <div className="space-y-6">
-        <div>
-          <h2 className="text-xl font-bold text-charcoal">Customization</h2>
-          <p className="text-sm text-gray-500 mt-1">Customize chatbot visuals for your website.</p>
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <h2 className="text-xl font-bold text-charcoal">Customization</h2>
+            <p className="text-sm text-gray-500 mt-1">Customize chatbot visuals for your website.</p>
+          </div>
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={saving || loadingSettings}
+            className="inline-flex items-center gap-2 bg-charcoal text-white px-4 py-2 rounded-lg hover:bg-black disabled:opacity-60 disabled:cursor-not-allowed transition"
+          >
+            <Save size={15} />
+            {saving ? "Saving..." : "Save Customization"}
+          </button>
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
@@ -419,7 +417,14 @@ export default function CustomizationSection() {
                 </h3>
               </div>
               <div className="p-6">
-                <IconGallery onIconSelect={setSelectedIcon} />
+                <IconGallery
+                  selectedIcon={selectedIcon}
+                  setSelectedIcon={setSelectedIcon}
+                  uploadedFile={uploadedFile}
+                  setUploadedFile={setUploadedFile}
+                  uploadingError={uploadingError}
+                  setUploadingError={setUploadingError}
+                />
               </div>
             </section>
 
@@ -452,37 +457,37 @@ export default function CustomizationSection() {
                       placeholder="#DC2626"
                       className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-crimson"
                     />
-                    {hexError && <p className="text-xs text-crimson mt-1">{hexError}</p>}
+                    {hexError ? <p className="text-xs text-crimson mt-1">{hexError}</p> : null}
                   </div>
 
                   <div>
                     <label className="text-xs font-semibold text-gray-600 mb-1 block">RGB</label>
                     <input
-                        type="text"
-                        value={rgbValue}
-                        onChange={(event) => handleRgbChange(event.target.value)}
-                        placeholder="220, 38, 38"
-                        className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-crimson"
+                      type="text"
+                      value={rgbValue}
+                      onChange={(event) => handleRgbChange(event.target.value)}
+                      placeholder="220, 38, 38"
+                      className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-crimson"
                     />
-                    {rgbError && <p className="text-xs text-crimson mt-1">{rgbError}</p>}
-                    </div>
+                    {rgbError ? <p className="text-xs text-crimson mt-1">{rgbError}</p> : null}
+                  </div>
                 </div>
-                </div>
+              </div>
             </section>
 
             <section className="bg-white border border-gray-200 rounded-xl overflow-visible relative z-30">
-                <div className="px-6 py-4 border-b border-gray-100 bg-gray-50/50">
+              <div className="px-6 py-4 border-b border-gray-100 bg-gray-50/50">
                 <h3 className="text-sm font-semibold text-charcoal flex items-center gap-2">
-                    <Type size={15} />
-                    Font Selection
+                  <Type size={15} />
+                  Font Selection
                 </h3>
-                </div>
-                <div className="p-6 relative z-40">
+              </div>
+              <div className="p-6 relative z-40">
                 <FontSelector value={fontFamily} onChange={setFontFamily} />
                 <p className="text-xs text-gray-500 mt-3">Choose from {GOOGLE_FONTS.length}+ Google free fonts</p>
-                </div>
+              </div>
             </section>
-        </div>
+          </div>
 
           <aside className="bg-white border border-gray-200 rounded-xl overflow-hidden h-fit sticky top-6 z-10">
             <div className="px-6 py-4 border-b border-gray-100 bg-gray-50/50">
@@ -490,28 +495,18 @@ export default function CustomizationSection() {
             </div>
             <div className="p-6">
               <div className="rounded-2xl border border-gray-200 p-4 bg-gray-50">
-                <div
-                  className="rounded-lg p-3 text-white text-sm mb-3 w-fit max-w-xs"
-                  style={{ backgroundColor: themeColor, fontFamily }}
-                >
+                <div className="rounded-lg p-3 text-white text-sm mb-3 w-fit max-w-xs" style={{ backgroundColor: themeColor, fontFamily }}>
                   Hi! I am your chatbot.
                 </div>
-                <div
-                  className="inline-block px-3 py-2 text-sm text-charcoal bg-white border border-gray-200 rounded-lg ml-auto block"
-                  style={{ fontFamily }}
-                >
+                <div className="inline-block px-3 py-2 text-sm text-charcoal bg-white border border-gray-200 rounded-lg ml-auto block" style={{ fontFamily }}>
                   Ask me anything about this website.
                 </div>
               </div>
 
               <div className="mt-4 space-y-2 text-xs text-gray-500">
-                <p>
-                  <strong>Color:</strong> <span className="font-mono">{themeColor}</span>
-                </p>
-                <p>
-                  <strong>Font:</strong> {fontFamily}
-                </p>
-                {selectedIcon && <p className="text-green-600">Selected icon ready</p>}
+                <p><strong>Color:</strong> <span className="font-mono">{themeColor}</span></p>
+                <p><strong>Font:</strong> {fontFamily}</p>
+                {selectedIcon?.source !== "none" ? <p className="text-green-600">Selected icon ready</p> : null}
               </div>
             </div>
           </aside>
