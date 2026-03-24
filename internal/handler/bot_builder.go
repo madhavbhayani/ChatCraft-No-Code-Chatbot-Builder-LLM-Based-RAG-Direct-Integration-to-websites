@@ -9,6 +9,7 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -363,8 +364,9 @@ func (h *BotBuilderHandler) runCrawlJob(jobID, projectID string, crawlURLs []str
 		for rows.Next() {
 			var id, srcURL, hash string
 			if rows.Scan(&id, &srcURL, &hash) == nil {
-				existingHashes[srcURL] = hash
-				existingIDs[srcURL] = id
+				normalizedSrcURL := normalizeCrawlURL(srcURL)
+				existingHashes[normalizedSrcURL] = hash
+				existingIDs[normalizedSrcURL] = id
 			}
 		}
 		rows.Close()
@@ -377,12 +379,13 @@ func (h *BotBuilderHandler) runCrawlJob(jobID, projectID string, crawlURLs []str
 
 	prog.Phase = "processing"
 	for i, page := range allPages {
-		newURLs[page.URL] = true
+		normalizedPageURL := normalizeCrawlURL(page.URL)
+		newURLs[normalizedPageURL] = true
 		rawContent := service.ComposeRawContent(page)
 		newHash := fmt.Sprintf("%x", sha256.Sum256([]byte(rawContent)))
 		wordCount := len(strings.Fields(rawContent))
 
-		if oldHash, exists := existingHashes[page.URL]; exists && oldHash == newHash {
+		if oldHash, exists := existingHashes[normalizedPageURL]; exists && oldHash == newHash {
 			skippedCount++
 			prog.addLog(fmt.Sprintf("⏭ Unchanged: %s", page.URL))
 			prog.SkippedURLs = skippedCount
@@ -392,7 +395,7 @@ func (h *BotBuilderHandler) runCrawlJob(jobID, projectID string, crawlURLs []str
 			continue
 		}
 
-		if oldID, exists := existingIDs[page.URL]; exists {
+		if oldID, exists := existingIDs[normalizedPageURL]; exists {
 			h.DB.Pool.Exec(ctx, "DELETE FROM documents WHERE id = $1", oldID)
 			prog.addLog(fmt.Sprintf("🔄 Updated: %s (%d words)", page.URL, wordCount))
 		} else {
@@ -1932,4 +1935,24 @@ func stripHTMLTags(s string) string {
 		}
 	}
 	return result.String()
+}
+
+// normalizeCrawlURL canonicalizes URL keys so incremental hash checks remain stable
+// across host casing, trailing slashes, and URL fragments.
+func normalizeCrawlURL(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return strings.TrimSpace(raw)
+	}
+
+	u.Fragment = ""
+	u.Host = strings.ToLower(u.Host)
+	if u.Path != "/" {
+		u.Path = strings.TrimRight(u.Path, "/")
+		if u.Path == "" {
+			u.Path = "/"
+		}
+	}
+
+	return u.String()
 }

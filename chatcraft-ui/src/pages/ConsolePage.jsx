@@ -10,6 +10,7 @@ import {
 import {
   Database,
   MessageSquare,
+  WandSparkles,
   FileText,
   Search,
   Loader2,
@@ -40,6 +41,7 @@ import { toast } from "sonner";
 import { getSession, isLoggedIn } from "../utils/auth";
 import KnowledgeBaseSection from "./KnowledgeBase/KnowledgeBaseSection";
 import TestChatSection from "./TestChat/TestChatSection";
+import CustomizationSection from "./Customization/CustomizationSection";
 import {
   PSGeneral,
   PSLlmModels,
@@ -230,6 +232,8 @@ export default function ConsolePage() {
     ? "project-settings"
     : pathAfterProject === "/test-chat"
     ? "chat"
+    : pathAfterProject === "/customization"
+    ? "customization"
     : "knowledge";
 
   // Project settings sub-tab from path
@@ -530,6 +534,19 @@ export default function ConsolePage() {
             Test Chat
           </button>
 
+          {/* Customization */}
+          <button
+            onClick={() => navigate(`/console/${projectId}/customization`)}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all cursor-pointer ${
+              activeSection === "customization"
+                ? "bg-crimson text-white shadow-lg shadow-crimson/25"
+                : "text-gray-400 hover:text-white hover:bg-white/5"
+            }`}
+          >
+            <WandSparkles size={17} />
+            Customization
+          </button>
+
           {/* Project Settings with dropdown */}
           <div>
             <button
@@ -679,6 +696,7 @@ export default function ConsolePage() {
               />
             }
           />
+          <Route path="customization" element={<CustomizationSection />} />
           <Route
             path="project-settings/general"
             element={

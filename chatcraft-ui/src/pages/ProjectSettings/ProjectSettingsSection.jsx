@@ -680,7 +680,7 @@ export function PSBehavior({ statusData, refreshStatus }) {
               type="button"
               onClick={handleSaveBehavior}
               disabled={savingBehavior}
-              className="w-full px-4 py-2.5 text-sm font-medium text-white bg-crimson rounded-lg hover:bg-rose-pink transition disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
+              className="px-4 py-2.5 text-sm font-medium text-white bg-crimson rounded-lg hover:bg-rose-pink transition disabled:opacity-50 cursor-pointer inline-flex items-center justify-center gap-2"
             >
               {savingBehavior ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
               Save Behavior Settings
