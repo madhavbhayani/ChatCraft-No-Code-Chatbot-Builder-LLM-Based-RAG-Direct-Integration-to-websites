@@ -13,6 +13,8 @@ func Logger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		metrics.IncRequests()
+		metrics.IncInFlight()
+		defer metrics.DecInFlight()
 
 		// Wrap response writer to capture status code
 		sw := &statusWriter{ResponseWriter: w, statusCode: http.StatusOK}
