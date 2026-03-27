@@ -1,31 +1,29 @@
-package middleware
+package logging
 
 import (
-	"log"
 	"net/http"
 	"time"
 
 	"github.com/madhavbhayani/ChatCraft-No-Code-Chatbot-Builder-LLM-Based-RAG-Direct-Integration-to-websites/internal/metrics"
 )
 
-// Logger logs each incoming HTTP request.
-func Logger(next http.Handler) http.Handler {
+// RequestLogger logs each incoming HTTP request and updates request metrics.
+func RequestLogger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		metrics.IncRequests()
 		metrics.IncInFlight()
 		defer metrics.DecInFlight()
 
-		// Wrap response writer to capture status code
 		sw := &statusWriter{ResponseWriter: w, statusCode: http.StatusOK}
 		next.ServeHTTP(sw, r)
 
-		log.Printf("[%s] %s %s → %d (%s)",
-			r.Method,
-			r.URL.Path,
-			r.RemoteAddr,
-			sw.statusCode,
-			time.Since(start).Round(time.Millisecond),
+		Info("http_request",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"remote", r.RemoteAddr,
+			"status", sw.statusCode,
+			"duration_ms", time.Since(start).Milliseconds(),
 		)
 	})
 }

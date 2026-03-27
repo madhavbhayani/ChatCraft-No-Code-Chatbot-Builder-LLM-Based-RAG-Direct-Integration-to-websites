@@ -696,7 +696,7 @@ export default function ConsolePage() {
               />
             }
           />
-          <Route path="customization" element={<CustomizationSection />} />
+          <Route path="customization" element={<CustomizationSection projectName={projectName} />} />
           <Route
             path="project-settings/general"
             element={

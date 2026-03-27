@@ -5,6 +5,7 @@ import (
 
 	"github.com/madhavbhayani/ChatCraft-No-Code-Chatbot-Builder-LLM-Based-RAG-Direct-Integration-to-websites/internal/database"
 	"github.com/madhavbhayani/ChatCraft-No-Code-Chatbot-Builder-LLM-Based-RAG-Direct-Integration-to-websites/internal/handler"
+	"github.com/madhavbhayani/ChatCraft-No-Code-Chatbot-Builder-LLM-Based-RAG-Direct-Integration-to-websites/internal/logging"
 	"github.com/madhavbhayani/ChatCraft-No-Code-Chatbot-Builder-LLM-Based-RAG-Direct-Integration-to-websites/internal/middleware"
 )
 
@@ -67,7 +68,7 @@ func NewRouter(db *database.DB) http.Handler {
 	mux.Handle("POST /api/v1/console/test-chat/{project_id}", authMw(http.HandlerFunc(botBuilder.TestChat)))
 	mux.Handle("PUT /api/v1/console/settings/{project_id}", authMw(http.HandlerFunc(botBuilder.UpdateProjectSettings)))
 	mux.Handle("PUT /api/v1/console/settings/behavior/{project_id}", authMw(http.HandlerFunc(botBuilder.UpdateBehaviorSettings)))
-	mux.Handle("GET /api/v1/console/customization/{project_id}", authMw(http.HandlerFunc(botBuilder.GetBotCustomization)))
+	mux.Handle("POST /api/v1/console/customization/{project_id}", authMw(http.HandlerFunc(botBuilder.GetBotCustomization)))
 	mux.Handle("PUT /api/v1/console/customization/{project_id}", authMw(http.HandlerFunc(botBuilder.SaveBotCustomization)))
 	mux.Handle("PUT /api/v1/console/model/{project_id}", authMw(http.HandlerFunc(botBuilder.SaveModelSelection)))
 	mux.Handle("DELETE /api/v1/console/data/{project_id}", authMw(http.HandlerFunc(botBuilder.DeleteProjectData)))
@@ -78,7 +79,7 @@ func NewRouter(db *database.DB) http.Handler {
 
 	// Apply middleware stack
 	var h http.Handler = mux
-	h = middleware.Logger(h)
+	h = logging.RequestLogger(h)
 	h = middleware.CORS(h)
 
 	return h

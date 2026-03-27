@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
-import { Palette, Type, Bot, Check, Upload, Search, Save } from "lucide-react";
+import { Palette, Type, Bot, Check, Upload, Search, Save, X, User } from "lucide-react";
 import { toast } from "sonner";
 import { getSession } from "../../utils/auth";
 
@@ -61,8 +61,16 @@ function rgbStringToHex(value) {
   return `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("").toUpperCase()}`;
 }
 
-function IconGallery({ selectedIcon, setSelectedIcon, uploadedFile, setUploadedFile, uploadingError, setUploadingError }) {
-  const [previewUrl, setPreviewUrl] = useState("");
+function IconGallery({
+  selectedIcon,
+  setSelectedIcon,
+  uploadedFile,
+  setUploadedFile,
+  uploadedPreviewUrl,
+  uploadingError,
+  setUploadingError,
+  onDeleteUploaded,
+}) {
 
   const iconModules = useMemo(
     () => import.meta.glob("../../assets/customization_icons/*.{png,jpg,jpeg,webp,svg}", { eager: true }),
@@ -74,16 +82,6 @@ function IconGallery({ selectedIcon, setSelectedIcon, uploadedFile, setUploadedF
     src: mod.default,
     name: path.split("/").pop()?.replace(/\.[^/.]+$/, "") || "icon",
   }));
-
-  useEffect(() => {
-    if (!uploadedFile) {
-      setPreviewUrl("");
-      return undefined;
-    }
-    const objectUrl = URL.createObjectURL(uploadedFile);
-    setPreviewUrl(objectUrl);
-    return () => URL.revokeObjectURL(objectUrl);
-  }, [uploadedFile]);
 
   const handleFileUpload = (event) => {
     const file = event.target.files?.[0];
@@ -105,26 +103,29 @@ function IconGallery({ selectedIcon, setSelectedIcon, uploadedFile, setUploadedF
     setSelectedIcon({ source: "uploaded", url: "", name: file.name });
   };
 
+  const hasUploadedIcon = selectedIcon?.source === "uploaded" && (!!uploadedFile || !!selectedIcon?.url);
+  const uploadedIconUrl = uploadedPreviewUrl || selectedIcon?.url || "";
+
   return (
     <div>
       <div className="flex flex-wrap items-start gap-2">
-        <label
-          className={`relative cursor-pointer border-2 border-dashed rounded-lg bg-gray-50 p-2 transition hover:border-crimson/40 hover:bg-gray-100 ${
-            selectedIcon?.source === "uploaded" ? "border-crimson bg-crimson/5" : "border-gray-300"
-          }`}
-          title="Upload icon"
-        >
-          <div className="w-12 h-12 flex flex-col items-center justify-center text-gray-500">
-            <Upload size={16} />
-            <span className="text-[10px] mt-1 leading-tight">Upload</span>
-          </div>
-          <input
-            type="file"
-            accept={SUPPORTED_FORMATS.map((ext) => `.${ext}`).join(",")}
-            onChange={handleFileUpload}
-            className="absolute inset-0 opacity-0 cursor-pointer"
-          />
-        </label>
+        {!hasUploadedIcon ? (
+          <label
+            className="relative cursor-pointer border-2 border-dashed rounded-lg bg-gray-50 p-2 transition hover:border-crimson/40 hover:bg-gray-100 border-gray-300"
+            title="Upload icon"
+          >
+            <div className="w-12 h-12 flex flex-col items-center justify-center text-gray-500">
+              <Upload size={16} />
+              <span className="text-[10px] mt-1 leading-tight">Upload</span>
+            </div>
+            <input
+              type="file"
+              accept={SUPPORTED_FORMATS.map((ext) => `.${ext}`).join(",")}
+              onChange={handleFileUpload}
+              className="absolute inset-0 opacity-0 cursor-pointer"
+            />
+          </label>
+        ) : null}
 
         {iconEntries.map((icon) => (
           <button
@@ -132,6 +133,7 @@ function IconGallery({ selectedIcon, setSelectedIcon, uploadedFile, setUploadedF
             type="button"
             onClick={() => {
               setUploadedFile(null);
+              setUploadingError("");
               setSelectedIcon({ source: "predefined", url: icon.src, name: icon.name });
             }}
             className={`border rounded-lg bg-white p-2 transition hover:border-crimson/40 hover:shadow-sm ${
@@ -145,16 +147,20 @@ function IconGallery({ selectedIcon, setSelectedIcon, uploadedFile, setUploadedF
           </button>
         ))}
 
-        {selectedIcon?.source === "uploaded" && previewUrl && (
-          <button
-            type="button"
-            onClick={() => setSelectedIcon({ source: "uploaded", url: "", name: uploadedFile?.name || "Uploaded" })}
-            className="border border-crimson bg-crimson/5 rounded-lg p-2"
-            title={selectedIcon?.name || "Uploaded icon"}
-          >
-            <img src={previewUrl} alt={selectedIcon?.name || "uploaded-icon"} className="w-12 h-12 object-contain" />
-          </button>
-        )}
+        {hasUploadedIcon && uploadedIconUrl ? (
+          <div className="relative group border border-crimson bg-crimson/5 rounded-lg p-2" title={selectedIcon?.name || "Uploaded icon"}>
+            <img src={uploadedIconUrl} alt={selectedIcon?.name || "uploaded-icon"} className="w-12 h-12 object-contain" />
+            <button
+              type="button"
+              onClick={onDeleteUploaded}
+              className="absolute -top-2 -right-2 h-5 w-5 rounded-full bg-charcoal text-white flex items-center justify-center shadow opacity-0 group-hover:opacity-100 transition"
+              title="Remove uploaded icon"
+              aria-label="Remove uploaded icon"
+            >
+              <X size={12} />
+            </button>
+          </div>
+        ) : null}
       </div>
 
       <p className="text-xs text-gray-500 mt-2">Supported: JPEG, JPG, PNG, SVG, WEBP. Max size: 250KB.</p>
@@ -234,7 +240,7 @@ function FontSelector({ value, onChange }) {
   );
 }
 
-export default function CustomizationSection() {
+export default function CustomizationSection({ projectName = "" }) {
   const { projectId } = useParams();
 
   const [selectedIcon, setSelectedIcon] = useState({ source: "none", url: "", name: "" });
@@ -250,8 +256,19 @@ export default function CustomizationSection() {
 
   const [saving, setSaving] = useState(false);
   const [loadingSettings, setLoadingSettings] = useState(true);
+  const [uploadedPreviewUrl, setUploadedPreviewUrl] = useState("");
 
   const token = getSession()?.token || "";
+
+  useEffect(() => {
+    if (!uploadedFile) {
+      setUploadedPreviewUrl("");
+      return undefined;
+    }
+    const objectUrl = URL.createObjectURL(uploadedFile);
+    setUploadedPreviewUrl(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [uploadedFile]);
 
   useEffect(() => {
     if (!projectId || !token) {
@@ -262,7 +279,7 @@ export default function CustomizationSection() {
     const fetchCustomization = async () => {
       try {
         const res = await fetch(`${API}/console/customization/${projectId}`, {
-          method: "GET",
+          method: "POST",
           headers: { Authorization: `Bearer ${token}` },
         });
         if (!res.ok) {
@@ -280,6 +297,7 @@ export default function CustomizationSection() {
         }
         if (data.icon_url) {
           setSelectedIcon({ source: data.icon_source || "uploaded", url: data.icon_url, name: "saved" });
+          setUploadedFile(null);
         }
       } catch (err) {
         // Non-blocking load failure
@@ -357,12 +375,15 @@ export default function CustomizationSection() {
 
       // Upload happens only when Save is clicked.
       if (selectedIcon?.source === "uploaded") {
-        if (!uploadedFile) {
+        if (uploadedFile) {
+          formData.append("icon_file", uploadedFile);
+        } else if (selectedIcon?.url) {
+          formData.append("selected_icon_url", selectedIcon.url);
+        } else {
           toast.error("Please select one icon file before saving");
           setSaving(false);
           return;
         }
-        formData.append("icon_file", uploadedFile);
       }
 
       const res = await fetch(`${API}/console/customization/${projectId}`, {
@@ -376,9 +397,19 @@ export default function CustomizationSection() {
         throw new Error(payload?.error || payload?.message || "Failed to save customization");
       }
 
-      if (payload?.icon_url) {
-        setSelectedIcon((prev) => ({ ...prev, url: payload.icon_url, source: payload.icon_source || prev.source }));
+      const nextSource = payload?.icon_source || selectedIcon?.source || "none";
+      if (nextSource === "none") {
+        setSelectedIcon({ source: "none", url: "", name: "" });
+      } else if (payload?.icon_url) {
+        setSelectedIcon((prev) => ({
+          ...prev,
+          url: payload.icon_url,
+          source: nextSource,
+          name: prev?.name || (nextSource === "uploaded" ? "uploaded" : "icon"),
+        }));
       }
+      setUploadedFile(null);
+      setUploadingError("");
 
       toast.success("Customization saved successfully");
     } catch (err) {
@@ -387,6 +418,17 @@ export default function CustomizationSection() {
       setSaving(false);
     }
   };
+
+  const handleDeleteUploadedIcon = () => {
+    setUploadedFile(null);
+    setUploadingError("");
+    setSelectedIcon({ source: "none", url: "", name: "" });
+  };
+
+  const chatbotAvatarUrl = selectedIcon?.source === "uploaded"
+    ? (uploadedPreviewUrl || selectedIcon?.url || "")
+    : (selectedIcon?.url || "");
+  const previewProjectName = projectName?.trim() || "there";
 
   return (
     <div className="flex-1 overflow-y-auto p-6">
@@ -422,8 +464,10 @@ export default function CustomizationSection() {
                   setSelectedIcon={setSelectedIcon}
                   uploadedFile={uploadedFile}
                   setUploadedFile={setUploadedFile}
+                  uploadedPreviewUrl={uploadedPreviewUrl}
                   uploadingError={uploadingError}
                   setUploadingError={setUploadingError}
+                  onDeleteUploaded={handleDeleteUploadedIcon}
                 />
               </div>
             </section>
@@ -494,12 +538,33 @@ export default function CustomizationSection() {
               <h3 className="text-sm font-semibold text-charcoal">Live Preview</h3>
             </div>
             <div className="p-6">
-              <div className="rounded-2xl border border-gray-200 p-4 bg-gray-50">
-                <div className="rounded-lg p-3 text-white text-sm mb-3 w-fit max-w-xs" style={{ backgroundColor: themeColor, fontFamily }}>
-                  Hi! I am your chatbot.
+              <div className="rounded-2xl border border-gray-200 p-4 bg-gray-50 space-y-3">
+                <div className="flex justify-end items-end gap-2">
+                  <div
+                    className="max-w-[80%] rounded-2xl rounded-br-md px-3 py-2 text-sm text-white shadow-sm"
+                    style={{ backgroundColor: themeColor, fontFamily }}
+                  >
+                    Hii {previewProjectName}, help me!
+                  </div>
+                  <div className="h-8 w-8 rounded-full bg-charcoal text-white flex items-center justify-center shrink-0">
+                    <User size={14} />
+                  </div>
                 </div>
-                <div className="inline-block px-3 py-2 text-sm text-charcoal bg-white border border-gray-200 rounded-lg ml-auto block" style={{ fontFamily }}>
-                  Ask me anything about this website.
+
+                <div className="flex items-end gap-2">
+                  <div className="h-8 w-8 rounded-full bg-white border border-gray-200 flex items-center justify-center shrink-0 overflow-hidden">
+                    {chatbotAvatarUrl ? (
+                      <img src={chatbotAvatarUrl} alt="Chatbot icon" className="h-full w-full object-cover" />
+                    ) : (
+                      <Bot size={14} className="text-charcoal" />
+                    )}
+                  </div>
+                  <div
+                    className="max-w-[80%] rounded-2xl rounded-bl-md px-3 py-2 text-sm text-charcoal bg-white border border-gray-200"
+                    style={{ fontFamily }}
+                  >
+                    Hii! Please tell me what kind of help you want.
+                  </div>
                 </div>
               </div>
 
