@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { ArrowLeft, Mail, Loader2, CheckCircle2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
-import { getSession, saveSession } from "../utils/auth";
+import { getSession, saveSession } from "../../utils/auth";
 
 export default function VerifyEmailPage() {
   const navigate = useNavigate();

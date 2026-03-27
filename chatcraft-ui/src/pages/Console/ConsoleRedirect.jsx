@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Loader2 } from "lucide-react";
-import { getSession, isLoggedIn } from "../utils/auth";
+import { getSession, isLoggedIn } from "../../utils/auth";
 
 /**
  * ConsoleRedirect - When user visits /console, fetch their project

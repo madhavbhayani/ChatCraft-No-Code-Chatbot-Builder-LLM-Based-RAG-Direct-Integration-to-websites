@@ -27,7 +27,7 @@ import {
   Calendar,
 } from "lucide-react";
 import { toast } from "sonner";
-import { getSession, isLoggedIn } from "../utils/auth";
+import { getSession, isLoggedIn } from "../../utils/auth";
 
 const API = "/api/v1";
 

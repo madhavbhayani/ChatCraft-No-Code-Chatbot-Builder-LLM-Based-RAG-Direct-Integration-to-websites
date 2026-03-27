@@ -1,17 +1,17 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { Toaster } from "sonner";
 import LandingPage from "./pages/LandingPage";
-import RegisterPage from "./pages/RegisterPage";
-import LoginPage from "./pages/LoginPage";
+import RegisterPage from "./pages/Authentication/RegisterPage";
+import LoginPage from "./pages/Authentication/LoginPage";
 import DashboardPage from "./pages/DashboardPage";
-import VerifyEmailPage from "./pages/VerifyEmailPage";
+import VerifyEmailPage from "./pages/Authentication/VerifyEmailPage";
 import AccountPage from "./pages/AccountPage";
-import ForgotPasswordPage from "./pages/ForgotPasswordPage";
-import ResetPasswordPage from "./pages/ResetPasswordPage";
+import ForgotPasswordPage from "./pages/Authentication/ForgotPasswordPage";
+import ResetPasswordPage from "./pages/Authentication/ResetPasswordPage";
 import DocsPage from "./pages/DocsPage";
-import IntegratePage from "./pages/IntegratePage";
-import ConsolePage from "./pages/ConsolePage";
-import ConsoleRedirect from "./pages/ConsoleRedirect";
+import IntegratePage from "./pages/Console/IntegratePage";
+import ConsolePage from "./pages/Console/ConsolePage";
+import ConsoleRedirect from "./pages/Console/ConsoleRedirect";
 
 function App() {
   return (

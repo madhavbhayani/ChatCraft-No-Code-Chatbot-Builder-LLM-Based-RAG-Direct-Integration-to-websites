@@ -2,9 +2,9 @@ import { useState } from "react";
 import { UserPlus, Mail, Lock, User, ArrowLeft } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { saveSession } from "../utils/auth";
-import { signInWithGoogle } from "../firebase";
-import GoogleSignInButton from "../components/GoogleSignInButton";
+import { saveSession } from "../../utils/auth";
+import { signInWithGoogle } from "../../firebase";
+import GoogleSignInButton from "../../components/GoogleSignInButton";
 
 export default function RegisterPage() {
   const navigate = useNavigate();

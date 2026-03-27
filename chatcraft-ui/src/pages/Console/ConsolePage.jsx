@@ -38,16 +38,16 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { toast } from "sonner";
-import { getSession, isLoggedIn } from "../utils/auth";
-import KnowledgeBaseSection from "./KnowledgeBase/KnowledgeBaseSection";
-import TestChatSection from "./TestChat/TestChatSection";
-import CustomizationSection from "./Customization/CustomizationSection";
+import { getSession, isLoggedIn } from "../../utils/auth";
+import KnowledgeBaseSection from "../KnowledgeBase/KnowledgeBaseSection";
+import TestChatSection from "../TestChat/TestChatSection";
+import CustomizationSection from "../Customization/CustomizationSection";
 import {
   PSGeneral,
   PSLlmModels,
   PSReIntegration,
   PSBehavior,
-} from "./ProjectSettings/ProjectSettingsSection";
+} from "../ProjectSettings/ProjectSettingsSection";
 
 const API = "/api/v1";
 
