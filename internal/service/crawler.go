@@ -5,7 +5,6 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
-	"log"
 	"math/rand"
 	"net/http"
 	"net/url"
@@ -20,6 +19,7 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/gocolly/colly/v2"
 	"github.com/madhavbhayani/ChatCraft-No-Code-Chatbot-Builder-LLM-Based-RAG-Direct-Integration-to-websites/config"
+	"github.com/madhavbhayani/ChatCraft-No-Code-Chatbot-Builder-LLM-Based-RAG-Direct-Integration-to-websites/internal/logging"
 	"github.com/temoto/robotstxt"
 )
 
@@ -243,7 +243,7 @@ func discoverSitemapURLs(baseURL string) []string {
 		// Try as sitemap index first
 		var idx sitemapIndex
 		if xml.Unmarshal(body, &idx) == nil && len(idx.Sitemaps) > 0 {
-			log.Printf("[crawler] Found sitemap index at %s (%d sitemaps)", origin+path, len(idx.Sitemaps))
+			logging.Debug("crawler sitemap index found", "url", origin+path, "sitemaps", len(idx.Sitemaps))
 			for _, sm := range idx.Sitemaps {
 				childResp, err := client.Get(sm.Loc)
 				if err != nil || childResp.StatusCode != 200 {
@@ -267,7 +267,7 @@ func discoverSitemapURLs(baseURL string) []string {
 		// Try as regular urlset
 		var us urlSet
 		if xml.Unmarshal(body, &us) == nil && len(us.URLs) > 0 {
-			log.Printf("[crawler] Found sitemap at %s (%d URLs)", origin+path, len(us.URLs))
+			logging.Debug("crawler sitemap found", "url", origin+path, "urls", len(us.URLs))
 			for _, u := range us.URLs {
 				add(u.Loc)
 			}
@@ -275,7 +275,7 @@ func discoverSitemapURLs(baseURL string) []string {
 		}
 	}
 
-	log.Printf("[crawler] Discovered %d URLs from sitemap", len(urls))
+	logging.Info("crawler sitemap discovery complete", "url_count", len(urls))
 	return urls
 }
 
@@ -305,10 +305,10 @@ func fetchRobotsTxt(baseURL string) *robotstxt.RobotsData {
 
 	robots, err := robotstxt.FromBytes(body)
 	if err != nil {
-		log.Printf("[crawler] Failed to parse robots.txt: %v", err)
+		logging.Error("crawler robots parse failed", "url", robotsURL, "error", err)
 		return nil
 	}
-	log.Printf("[crawler] Loaded robots.txt from %s", robotsURL)
+	logging.Debug("crawler robots loaded", "url", robotsURL)
 	return robots
 }
 
@@ -735,7 +735,7 @@ func SmartCrawl(baseURL string, progressFn CrawlProgressFn) (*CrawlResult, error
 		allowedDomains = append(allowedDomains, rootDomain, "www."+rootDomain)
 	}
 
-	log.Printf("[crawler] Allowed domains: %v", allowedDomains)
+	logging.Debug("crawler allowed domains", "domains", allowedDomains)
 
 	maxPages := getMaxPages()
 
@@ -800,7 +800,7 @@ func SmartCrawl(baseURL string, progressFn CrawlProgressFn) (*CrawlResult, error
 			mu.Lock()
 			report.RobotsTxtBlocked++
 			mu.Unlock()
-			log.Printf("[crawler] Blocked by robots.txt: %s", r.URL)
+			logging.Debug("crawler blocked by robots", "url", r.URL.String())
 			r.Abort()
 			return
 		}
@@ -817,7 +817,7 @@ func SmartCrawl(baseURL string, progressFn CrawlProgressFn) (*CrawlResult, error
 			thinNow := report.ThinContentSkipped
 			errNow := report.ErrorCount
 			mu.Unlock()
-			log.Printf("[crawler] Phase 1 filter rejected (%d words): %s", page.WordCount, e.Request.URL)
+			logging.Debug("crawler phase1 filtered", "url", e.Request.URL.String(), "word_count", page.WordCount)
 			if progressFn != nil {
 				progressFn(int(count.Load()), thinNow, errNow, e.Request.URL.String())
 			}
@@ -834,7 +834,7 @@ func SmartCrawl(baseURL string, progressFn CrawlProgressFn) (*CrawlResult, error
 		mu.Unlock()
 
 		count.Add(1)
-		log.Printf("[crawler] ✓ Extracted %d words from: %s", page.WordCount, e.Request.URL)
+		logging.Debug("crawler page extracted", "url", e.Request.URL.String(), "word_count", page.WordCount)
 		if progressFn != nil {
 			progressFn(pagesNow, thinNow, errNow, e.Request.URL.String())
 		}
@@ -871,7 +871,7 @@ func SmartCrawl(baseURL string, progressFn CrawlProgressFn) (*CrawlResult, error
 		thinNow := report.ThinContentSkipped
 		errNow := report.ErrorCount
 		mu.Unlock()
-		log.Printf("[crawler] Error %d on %s: %v", r.StatusCode, r.Request.URL, err)
+		logging.Error("crawler request failed", "url", r.Request.URL.String(), "status_code", r.StatusCode, "error", err)
 		if progressFn != nil {
 			progressFn(pagesNow, thinNow, errNow, r.Request.URL.String())
 		}
@@ -880,7 +880,7 @@ func SmartCrawl(baseURL string, progressFn CrawlProgressFn) (*CrawlResult, error
 	c.OnResponse(func(r *colly.Response) {
 		ct := r.Headers.Get("Content-Type")
 		if !strings.Contains(ct, "text/html") && !strings.Contains(ct, "application/xhtml") {
-			log.Printf("[crawler] Non-HTML response (%s) from: %s", ct, r.Request.URL)
+			logging.Debug("crawler non-html response", "url", r.Request.URL.String(), "content_type", ct)
 		}
 	})
 
@@ -903,8 +903,11 @@ func SmartCrawl(baseURL string, progressFn CrawlProgressFn) (*CrawlResult, error
 			pool = len(scored)
 		}
 		scored = scored[:pool]
-		log.Printf("[crawler] Prioritized %d/%d sitemap URLs (filtered %d low-score)",
-			len(scored), len(sitemapURLs), len(sitemapURLs)-len(scored))
+		logging.Info("crawler sitemap urls prioritized",
+			"prioritized", len(scored),
+			"total", len(sitemapURLs),
+			"filtered_low_score", len(sitemapURLs)-len(scored),
+		)
 		for _, su := range scored {
 			if count.Load() >= int32(maxPages) {
 				break
@@ -922,14 +925,21 @@ func SmartCrawl(baseURL string, progressFn CrawlProgressFn) (*CrawlResult, error
 
 	c.Wait()
 
-	log.Printf("[crawler] Colly finished: %d pages, %d thin-skipped, %d robots-blocked, %d errors, %d dupes",
-		len(pages), report.ThinContentSkipped, report.RobotsTxtBlocked, report.ErrorCount, report.DuplicatesSkipped)
+	logging.Info("crawler run finished",
+		"pages", len(pages),
+		"thin_skipped", report.ThinContentSkipped,
+		"robots_blocked", report.RobotsTxtBlocked,
+		"errors", report.ErrorCount,
+		"duplicates", report.DuplicatesSkipped,
+	)
 
 	// If Colly found no usable pages but lots of thin content,
 	// the site likely uses JavaScript rendering (SPA). Log a message.
 	if len(pages) == 0 && report.ThinContentSkipped > 0 {
-		log.Printf("[crawler] WARNING: No content from static HTML (thin=%d). Site may use JavaScript rendering — content not rendered (headless browser disabled).",
-			report.ThinContentSkipped)
+		logging.Warn("crawler no static content extracted",
+			"thin_skipped", report.ThinContentSkipped,
+			"hint", "site may require JavaScript rendering",
+		)
 	}
 
 	if len(pages) == 0 {
@@ -944,8 +954,12 @@ func SmartCrawl(baseURL string, progressFn CrawlProgressFn) (*CrawlResult, error
 	}
 	report.CrawlDurationSecs = time.Since(startTime).Seconds()
 
-	log.Printf("[crawler] Complete: %d pages, %d FAQs, %d words in %.1fs",
-		report.PagesCrawled, report.FAQsDetected, report.TotalWords, report.CrawlDurationSecs)
+	logging.Info("crawler complete",
+		"pages", report.PagesCrawled,
+		"faqs", report.FAQsDetected,
+		"words", report.TotalWords,
+		"duration_secs", report.CrawlDurationSecs,
+	)
 
 	return &CrawlResult{Pages: pages, Report: report}, nil
 }
