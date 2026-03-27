@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/madhavbhayani/ChatCraft-No-Code-Chatbot-Builder-LLM-Based-RAG-Direct-Integration-to-websites/config"
 	"github.com/madhavbhayani/ChatCraft-No-Code-Chatbot-Builder-LLM-Based-RAG-Direct-Integration-to-websites/internal/database"
 	"github.com/madhavbhayani/ChatCraft-No-Code-Chatbot-Builder-LLM-Based-RAG-Direct-Integration-to-websites/internal/service"
 
@@ -128,7 +129,9 @@ func (h *ChatHandler) Chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 4: Vector similarity search — threshold 0.60, LIMIT 12
+	ragCfg := config.GetRAGConfig()
+
+	// Step 4: Vector similarity search using configured threshold and limit.
 	vec := pgvector.NewVector(questionEmbedding)
 	rows, err := h.DB.Pool.Query(ctx,
 		`SELECT c.content, d.source_url,
@@ -140,10 +143,10 @@ func (h *ChatHandler) Chat(w http.ResponseWriter, r *http.Request) {
 		 JOIN documents d ON c.document_id = d.id
 		 WHERE c.project_id = $2
 		   AND c.embedding IS NOT NULL
-		   AND 1 - (c.embedding <=> $1) > 0.60
+		   AND 1 - (c.embedding <=> $1) > $3
 		 ORDER BY similarity DESC
-		 LIMIT 12`,
-		vec, projectID,
+		 LIMIT $4`,
+		vec, projectID, ragCfg.SimilarityThresh, ragCfg.MaxContextChunks,
 	)
 	if err != nil {
 		log.Printf("[chat] vector search error: %v", err)

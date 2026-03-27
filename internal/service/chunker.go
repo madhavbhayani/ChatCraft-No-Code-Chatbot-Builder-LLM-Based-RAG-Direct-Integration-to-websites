@@ -3,6 +3,8 @@ package service
 import (
 	"fmt"
 	"strings"
+
+	"github.com/madhavbhayani/ChatCraft-No-Code-Chatbot-Builder-LLM-Based-RAG-Direct-Integration-to-websites/config"
 )
 
 // TextChunk represents a single embeddable piece of content.
@@ -154,7 +156,7 @@ func SmartChunkText(title, text string, maxWords, overlapWords int) []TextChunk 
 	if overlapWords <= 0 {
 		overlapWords = 40
 	}
-	const minWords = 50
+	minWords := config.GetRAGConfig().MinChunkWords
 
 	var chunks []TextChunk
 	idx := 0
@@ -293,7 +295,7 @@ func SmartChunkText(title, text string, maxWords, overlapWords int) []TextChunk 
 // is larger than maxWords. It splits by word boundaries with overlap,
 // preserving the self-contained header on every sub-chunk.
 func splitLargeParagraph(title, heading, text string, maxWords, overlapWords int, idx *int) []TextChunk {
-	const minWords = 50
+	minWords := config.GetRAGConfig().MinChunkWords
 
 	header := title
 	if heading != "" {

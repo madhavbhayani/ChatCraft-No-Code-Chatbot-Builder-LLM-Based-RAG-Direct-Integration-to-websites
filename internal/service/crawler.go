@@ -19,14 +19,15 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/gocolly/colly/v2"
+	"github.com/madhavbhayani/ChatCraft-No-Code-Chatbot-Builder-LLM-Based-RAG-Direct-Integration-to-websites/config"
 	"github.com/temoto/robotstxt"
 )
 
 // ---------- Configuration ----------
 
-const (
-	minWordCount = 100 // Minimum words to keep a page (raised for quality filtering)
-)
+func minWordCount() int {
+	return config.GetRAGConfig().MinPageWords
+}
 
 // getMaxPages returns the max crawl pages from env MAX_CRAWL_PAGES, defaulting to 100.
 func getMaxPages() int {
@@ -369,19 +370,19 @@ func extractPageContentFromDoc(doc *goquery.Selection, pageURL string) *PageCont
 	for _, sel := range contentSelectors {
 		if found := doc.Find(sel); found.Length() > 0 {
 			mainContent = extractStructuredText(found)
-			if len(strings.Fields(mainContent)) >= minWordCount {
+			if len(strings.Fields(mainContent)) >= minWordCount() {
 				break
 			}
 		}
 	}
 
 	// Fallback 1: structured extraction from body
-	if len(strings.Fields(mainContent)) < minWordCount {
+	if len(strings.Fields(mainContent)) < minWordCount() {
 		mainContent = extractStructuredText(doc.Find("body"))
 	}
 
 	// Fallback 2: raw body text (same approach as old crawler — most robust)
-	if len(strings.Fields(mainContent)) < minWordCount {
+	if len(strings.Fields(mainContent)) < minWordCount() {
 		// Remove nav/footer/header/aside for clean body text
 		bodyCopy := doc.Find("body").Clone()
 		bodyCopy.Find("nav, footer, header, aside, form, button").Remove()
@@ -599,7 +600,7 @@ func detectContentType(pageURL string, doc *goquery.Selection, faqs []QAPair) st
 // It checks word count, password inputs, link density, and stripped body text.
 func passesPhaseOneFilter(doc *goquery.Selection, wordCount int) bool {
 	// Check 1: Minimum word count
-	if wordCount < minWordCount {
+	if wordCount < minWordCount() {
 		return false
 	}
 
@@ -779,7 +780,7 @@ func SmartCrawl(baseURL string, progressFn CrawlProgressFn) (*CrawlResult, error
 			return
 		}
 
-		normalized := normalizeURL(r.URL.String())
+		normalized := strings.ToLower(normalizeURL(r.URL.String()))
 		mu.Lock()
 		if visited[normalized] {
 			report.DuplicatesSkipped++
