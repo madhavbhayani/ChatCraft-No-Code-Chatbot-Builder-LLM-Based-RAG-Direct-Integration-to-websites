@@ -6,12 +6,18 @@ A full-stack no-code chatbot builder that lets you design, train, and deploy AI-
 
 1. Supports Table creation and display on the test chat.
 2. Custom Fallback Message and links.
+3. Easy authentication with email/password or Google Sign in.
+4. More chatbot customization options (icon, theme color, and font controls).
 
 ## Preview
 
 | Test Chat (Table + Inline Sources) | Project Settings (Chatbot Behavior) |
 | ---------------------------------- | ----------------------------------- |
-| ![Test Chat Preview](images/image.png) | ![Chatbot Behavior Preview](images/image2.png) |
+| ![Test Chat Preview](images/image1.png) | ![Chatbot Behavior Preview](images/image2.png) |
+
+| Chat Customizations | Login to ChatCraft (Email/Password or Google Sign in) |
+| ------------------- | ------------------------------------------------------ |
+| ![Chat Customizations Preview](images/image3.png) | ![Login Preview](images/image4.png) |
 
 ## Tech Stack
 
@@ -32,8 +38,9 @@ ChatBot Builder/
 ├── config/                    # Configuration loader
 ├── internal/
 │   ├── database/              # DB connection + migrations
-│   ├── handler/               # HTTP handlers (auth, health)
-│   ├── middleware/             # CORS, request logger
+│   ├── handler/               # HTTP handlers (auth, console, customization)
+│   ├── logging/               # Structured logging + request logger middleware
+│   ├── middleware/            # CORS, auth
 │   ├── model/                 # Data models (user, bot)
 │   └── server/                # Router setup
 ├── chatcraft-ui/              # React frontend (Vite)
