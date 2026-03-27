@@ -22,7 +22,7 @@ export default function AnalyticsSection() {
       }
 
       try {
-        const res = await fetch(`${API}/console/analytics/${projectId}`, {
+        const res = await fetch(`${API}/console/realtime-analytics/${projectId}`, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${token}`,
@@ -86,10 +86,8 @@ export default function AnalyticsSection() {
     <div className="flex-1 overflow-y-auto p-6">
       <div className="space-y-6">
         <div>
-          <h2 className="text-xl font-bold text-charcoal">Analytics</h2>
-          <p className="text-sm text-gray-500 mt-1">
-            Monitor chatbot usage, confidence trends, and session-level conversation history.
-          </p>
+          <h2 className="text-xl font-bold text-charcoal">Realtime Analytics</h2>
+          <p className="text-sm text-gray-500 mt-1">Monitor chatbot usage, confidence trends, and session-level conversation history in realtime.</p>
         </div>
 
         <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
@@ -243,7 +241,7 @@ export default function AnalyticsSection() {
                   </div>
                 </section>
 
-                <p className="text-center text-xs text-gray-500">Analytics will take 24 hr to get updated.</p>
+                <p className="text-center text-xs text-gray-500">Realtime analytics updates on every request.</p>
               </div>
             )}
           </div>

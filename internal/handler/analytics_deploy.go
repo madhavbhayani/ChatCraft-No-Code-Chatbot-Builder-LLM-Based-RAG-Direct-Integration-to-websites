@@ -37,14 +37,8 @@ type analyticsConversationEntry struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
-const (
-	analyticsRefreshEvery    = 24 * time.Hour
-	analyticsRefreshMinDelta = 5
-)
-
 // GetProjectAnalytics returns pre-computed analytics data for a project.
-// Analytics are not real-time: they refresh at most every 24h, or earlier
-// when queued conversation updates for the project reach the configured threshold.
+// Analytics are real-time and refreshed directly from conversations on each request.
 func (h *BotBuilderHandler) GetProjectAnalytics(w http.ResponseWriter, r *http.Request) {
 	userID := r.Header.Get("X-User-ID")
 	projectID := r.PathValue("project_id")
@@ -66,23 +60,11 @@ func (h *BotBuilderHandler) GetProjectAnalytics(w http.ResponseWriter, r *http.R
 		}
 	}
 
-	recomputed, err := h.refreshProjectAnalyticsIfNeeded(r.Context(), projectID)
+	err := h.recomputeProjectAnalytics(r.Context(), projectID, time.Now())
 	if err != nil {
-		log.Printf("[analytics] refresh failed: %v", err)
-		writeError(w, http.StatusInternalServerError, "Failed to refresh analytics")
+		log.Printf("[analytics] realtime recompute failed: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to compute realtime analytics")
 		return
-	}
-
-	var queuedUpdates int
-	var lastConversationAt, lastProcessedAt *time.Time
-	queueErr := h.DB.Pool.QueryRow(r.Context(),
-		`SELECT pending_updates, last_conversation_at, last_processed_at
-		 FROM analytics_refresh_queue
-		 WHERE project_id = $1`,
-		projectID,
-	).Scan(&queuedUpdates, &lastConversationAt, &lastProcessedAt)
-	if queueErr != nil && queueErr != pgx.ErrNoRows {
-		log.Printf("[analytics] queue fetch failed: %v", queueErr)
 	}
 
 	var (
@@ -176,66 +158,11 @@ func (h *BotBuilderHandler) GetProjectAnalytics(w http.ResponseWriter, r *http.R
 			"confidence_per_session":       confidencePerSession,
 			"average_messages_per_session": avgMessagesPerSession,
 		},
-		"sessions":               sessions,
-		"session_conversations":  sessionConversations,
-		"queued_updates":         queuedUpdates,
-		"last_conversation_at":   lastConversationAt,
-		"last_processed_at":      lastProcessedAt,
-		"last_calculated_at":     lastCalculatedAt,
-		"recomputed_now":         recomputed,
-		"refresh_threshold":      analyticsRefreshMinDelta,
-		"refresh_interval_hours": int(analyticsRefreshEvery.Hours()),
-		"message":                "Statistics will take 24 hr to get updated.",
+		"sessions":              sessions,
+		"session_conversations": sessionConversations,
+		"last_calculated_at":    lastCalculatedAt,
+		"message":               "Realtime analytics updated from latest conversations.",
 	})
-}
-
-func (h *BotBuilderHandler) refreshProjectAnalyticsIfNeeded(ctx context.Context, projectID string) (bool, error) {
-	var pendingUpdates int
-	queueErr := h.DB.Pool.QueryRow(ctx,
-		`SELECT pending_updates
-		 FROM analytics_refresh_queue
-		 WHERE project_id = $1`,
-		projectID,
-	).Scan(&pendingUpdates)
-	if queueErr != nil && queueErr != pgx.ErrNoRows {
-		return false, queueErr
-	}
-	if queueErr == pgx.ErrNoRows {
-		pendingUpdates = 0
-	}
-
-	var lastCalculatedAt *time.Time
-	statsErr := h.DB.Pool.QueryRow(ctx,
-		`SELECT last_calculated_at
-		 FROM project_analytics_stats
-		 WHERE project_id = $1`,
-		projectID,
-	).Scan(&lastCalculatedAt)
-	if statsErr != nil && statsErr != pgx.ErrNoRows {
-		return false, statsErr
-	}
-	if statsErr == pgx.ErrNoRows {
-		lastCalculatedAt = nil
-	}
-
-	now := time.Now()
-	shouldRefresh := pendingUpdates >= analyticsRefreshMinDelta
-	if !shouldRefresh {
-		if lastCalculatedAt == nil {
-			shouldRefresh = true
-		} else if now.Sub(*lastCalculatedAt) >= analyticsRefreshEvery {
-			shouldRefresh = true
-		}
-	}
-
-	if !shouldRefresh {
-		return false, nil
-	}
-
-	if err := h.recomputeProjectAnalytics(ctx, projectID, now); err != nil {
-		return false, err
-	}
-	return true, nil
 }
 
 func (h *BotBuilderHandler) recomputeProjectAnalytics(ctx context.Context, projectID string, now time.Time) error {
@@ -476,19 +403,6 @@ func (h *BotBuilderHandler) recomputeProjectAnalytics(ctx context.Context, proje
 		return err
 	}
 
-	_, err = tx.Exec(ctx,
-		`INSERT INTO analytics_refresh_queue (project_id, pending_updates, last_processed_at, updated_at)
-		 VALUES ($1, 0, $2, NOW())
-		 ON CONFLICT (project_id)
-		 DO UPDATE SET pending_updates = 0,
-		               last_processed_at = EXCLUDED.last_processed_at,
-		               updated_at = NOW()`,
-		projectID, now,
-	)
-	if err != nil {
-		return err
-	}
-
 	return tx.Commit(ctx)
 }
 
@@ -581,16 +495,6 @@ func (h *BotBuilderHandler) DeployProjectBot(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "Failed to update deployment state")
 		return
 	}
-
-	analyticsEventType := "bot_undeployed"
-	if deployed {
-		analyticsEventType = "bot_deployed"
-	}
-	_, _ = h.DB.Pool.Exec(r.Context(),
-		`INSERT INTO project_analytics (user_id, project_id, event_type, event_data, created_at)
-		 VALUES ($1, $2, $3, $4::jsonb, NOW())`,
-		userID, projectID, analyticsEventType, string(settingsJSON),
-	)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{

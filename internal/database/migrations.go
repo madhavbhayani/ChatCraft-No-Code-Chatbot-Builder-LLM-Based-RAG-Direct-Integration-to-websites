@@ -316,6 +316,15 @@ var migrations = []struct {
 			EXECUTE FUNCTION enqueue_project_analytics_refresh();
 		`,
 	},
+	{
+		Name: "022_drop_legacy_analytics_queue_and_events",
+		SQL: `
+			DROP TRIGGER IF EXISTS trg_conversations_enqueue_analytics ON conversations;
+			DROP FUNCTION IF EXISTS enqueue_project_analytics_refresh();
+			DROP TABLE IF EXISTS analytics_refresh_queue;
+			DROP TABLE IF EXISTS project_analytics;
+		`,
+	},
 }
 
 // RunMigrations applies all pending migrations.

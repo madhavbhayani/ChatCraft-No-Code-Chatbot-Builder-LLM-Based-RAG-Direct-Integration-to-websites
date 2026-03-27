@@ -234,7 +234,7 @@ export default function ConsolePage() {
   );
   const activeSection = pathAfterProject.startsWith("/project-settings")
     ? "project-settings"
-    : pathAfterProject === "/analytics"
+    : pathAfterProject === "/realtime-analytics" || pathAfterProject === "/analytics"
     ? "analytics"
     : pathAfterProject === "/test-chat"
     ? "chat"
@@ -639,9 +639,9 @@ export default function ConsolePage() {
             Knowledge Base
           </button>
 
-          {/* Analytics (under Knowledge Base) */}
+          {/* Realtime Analytics (under Knowledge Base) */}
           <button
-            onClick={() => navigate(`/console/${projectId}/analytics`)}
+            onClick={() => navigate(`/console/${projectId}/realtime-analytics`)}
             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all cursor-pointer ${
               activeSection === "analytics"
                 ? "bg-crimson text-white shadow-lg shadow-crimson/25"
@@ -649,7 +649,7 @@ export default function ConsolePage() {
             }`}
           >
             <BarChart3 size={17} />
-            Analytics
+            Realtime Analytics
           </button>
 
           {/* Test Chat */}
@@ -841,7 +841,11 @@ export default function ConsolePage() {
             }
           />
           <Route path="customization" element={<CustomizationSection projectName={projectName} />} />
-          <Route path="analytics" element={<AnalyticsSection />} />
+          <Route path="realtime-analytics" element={<AnalyticsSection />} />
+          <Route
+            path="analytics"
+            element={<Navigate to={`/console/${projectId}/realtime-analytics`} replace />}
+          />
           <Route path="deployment" element={<DeploymentSection />} />
           <Route
             path="project-settings/general"

@@ -70,7 +70,7 @@ func NewRouter(db *database.DB) http.Handler {
 	mux.Handle("PUT /api/v1/console/settings/behavior/{project_id}", authMw(http.HandlerFunc(botBuilder.UpdateBehaviorSettings)))
 	mux.Handle("POST /api/v1/console/customization/{project_id}", authMw(http.HandlerFunc(botBuilder.GetBotCustomization)))
 	mux.Handle("PUT /api/v1/console/customization/{project_id}", authMw(http.HandlerFunc(botBuilder.SaveBotCustomization)))
-	mux.Handle("POST /api/v1/console/analytics/{project_id}", authMw(http.HandlerFunc(botBuilder.GetProjectAnalytics)))
+	mux.Handle("POST /api/v1/console/realtime-analytics/{project_id}", authMw(http.HandlerFunc(botBuilder.GetProjectAnalytics)))
 	mux.Handle("POST /api/v1/console/deploy/{project_id}", authMw(http.HandlerFunc(botBuilder.DeployProjectBot)))
 	mux.Handle("PUT /api/v1/console/model/{project_id}", authMw(http.HandlerFunc(botBuilder.SaveModelSelection)))
 	mux.Handle("DELETE /api/v1/console/data/{project_id}", authMw(http.HandlerFunc(botBuilder.DeleteProjectData)))
