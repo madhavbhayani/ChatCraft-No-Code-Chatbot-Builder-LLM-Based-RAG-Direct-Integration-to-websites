@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
-import { Palette, Type, Bot, Check, Upload, Search, Save, X, User } from "lucide-react";
+import { Palette, Type, Bot, Check, Upload, Search, Save, X, User, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { getSession } from "../../utils/auth";
 
@@ -429,6 +429,16 @@ export default function CustomizationSection({ projectName = "" }) {
     ? (uploadedPreviewUrl || selectedIcon?.url || "")
     : (selectedIcon?.url || "");
   const previewProjectName = projectName?.trim() || "there";
+
+  if (loadingSettings) {
+    return (
+      <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex items-center justify-center py-20">
+          <Loader2 size={24} className="text-crimson animate-spin" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 overflow-y-auto p-6">

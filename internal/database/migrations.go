@@ -241,6 +241,81 @@ var migrations = []struct {
 			CREATE INDEX IF NOT EXISTS idx_bot_customizations_project_id ON bot_customizations(project_id);
 		`,
 	},
+	{
+		Name: "019_create_project_analytics",
+		SQL: `
+			CREATE TABLE IF NOT EXISTS project_analytics (
+				id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+				user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+				project_id   UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+				event_type   VARCHAR(64) NOT NULL,
+				event_data   JSONB NOT NULL DEFAULT '{}',
+				created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+			);
+			CREATE INDEX IF NOT EXISTS idx_project_analytics_project_id ON project_analytics(project_id);
+			CREATE INDEX IF NOT EXISTS idx_project_analytics_user_id ON project_analytics(user_id);
+			CREATE INDEX IF NOT EXISTS idx_project_analytics_event_type ON project_analytics(event_type);
+			CREATE INDEX IF NOT EXISTS idx_project_analytics_created_at ON project_analytics(created_at DESC);
+		`,
+	},
+	{
+		Name: "020_add_bot_deployment_columns",
+		SQL: `
+			ALTER TABLE bots ADD COLUMN IF NOT EXISTS project_id UUID REFERENCES projects(id) ON DELETE CASCADE;
+			ALTER TABLE bots ADD COLUMN IF NOT EXISTS is_deployed BOOLEAN NOT NULL DEFAULT false;
+			ALTER TABLE bots ADD COLUMN IF NOT EXISTS deployed_at TIMESTAMPTZ;
+			CREATE UNIQUE INDEX IF NOT EXISTS idx_bots_project_id_unique ON bots(project_id) WHERE project_id IS NOT NULL;
+			CREATE INDEX IF NOT EXISTS idx_bots_is_deployed ON bots(is_deployed);
+		`,
+	},
+	{
+		Name: "021_create_project_analytics_stats_and_queue",
+		SQL: `
+			CREATE TABLE IF NOT EXISTS project_analytics_stats (
+				project_id                 UUID PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+				total_sessions             INT NOT NULL DEFAULT 0,
+				avg_confidence             DOUBLE PRECISION NOT NULL DEFAULT 0,
+				total_messages             INT NOT NULL DEFAULT 0,
+				fallback_messages          INT NOT NULL DEFAULT 0,
+				non_fallback_messages      INT NOT NULL DEFAULT 0,
+				avg_messages_per_session   DOUBLE PRECISION NOT NULL DEFAULT 0,
+				date_wise_sessions         JSONB NOT NULL DEFAULT '[]',
+				messages_per_session       JSONB NOT NULL DEFAULT '[]',
+				confidence_per_session     JSONB NOT NULL DEFAULT '[]',
+				latest_sessions            JSONB NOT NULL DEFAULT '[]',
+				session_conversations      JSONB NOT NULL DEFAULT '{}',
+				last_calculated_at         TIMESTAMPTZ,
+				updated_at                 TIMESTAMPTZ NOT NULL DEFAULT NOW()
+			);
+
+			CREATE TABLE IF NOT EXISTS analytics_refresh_queue (
+				project_id             UUID PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+				pending_updates        INT NOT NULL DEFAULT 0,
+				last_conversation_at   TIMESTAMPTZ,
+				last_processed_at      TIMESTAMPTZ,
+				updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
+			);
+
+			CREATE OR REPLACE FUNCTION enqueue_project_analytics_refresh()
+			RETURNS TRIGGER AS $$
+			BEGIN
+				INSERT INTO analytics_refresh_queue (project_id, pending_updates, last_conversation_at, updated_at)
+				VALUES (NEW.project_id, 1, NOW(), NOW())
+				ON CONFLICT (project_id)
+				DO UPDATE SET pending_updates = analytics_refresh_queue.pending_updates + 1,
+				              last_conversation_at = NOW(),
+				              updated_at = NOW();
+				RETURN NEW;
+			END;
+			$$ LANGUAGE plpgsql;
+
+			DROP TRIGGER IF EXISTS trg_conversations_enqueue_analytics ON conversations;
+			CREATE TRIGGER trg_conversations_enqueue_analytics
+			AFTER INSERT ON conversations
+			FOR EACH ROW
+			EXECUTE FUNCTION enqueue_project_analytics_refresh();
+		`,
+	},
 }
 
 // RunMigrations applies all pending migrations.

@@ -36,12 +36,16 @@ import {
   Cpu,
   FolderCog,
   ChevronDown,
+  BarChart3,
+  Rocket,
 } from "lucide-react";
 import { toast } from "sonner";
 import { getSession, isLoggedIn } from "../../utils/auth";
 import KnowledgeBaseSection from "../KnowledgeBase/KnowledgeBaseSection";
 import TestChatSection from "../TestChat/TestChatSection";
 import CustomizationSection from "../Customization/CustomizationSection";
+import AnalyticsSection from "../Analytics/AnalyticsSection";
+import DeploymentSection from "../Deployment/DeploymentSection";
 import {
   PSGeneral,
   PSLlmModels,
@@ -230,8 +234,12 @@ export default function ConsolePage() {
   );
   const activeSection = pathAfterProject.startsWith("/project-settings")
     ? "project-settings"
+    : pathAfterProject === "/analytics"
+    ? "analytics"
     : pathAfterProject === "/test-chat"
     ? "chat"
+    : pathAfterProject === "/deployment"
+    ? "deployment"
     : pathAfterProject === "/customization"
     ? "customization"
     : "knowledge";
@@ -631,6 +639,19 @@ export default function ConsolePage() {
             Knowledge Base
           </button>
 
+          {/* Analytics (under Knowledge Base) */}
+          <button
+            onClick={() => navigate(`/console/${projectId}/analytics`)}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all cursor-pointer ${
+              activeSection === "analytics"
+                ? "bg-crimson text-white shadow-lg shadow-crimson/25"
+                : "text-gray-400 hover:text-white hover:bg-white/5"
+            }`}
+          >
+            <BarChart3 size={17} />
+            Analytics
+          </button>
+
           {/* Test Chat */}
           <button
             onClick={() => navigate(`/console/${projectId}/test-chat`)}
@@ -655,6 +676,19 @@ export default function ConsolePage() {
           >
             <WandSparkles size={17} />
             Customization
+          </button>
+
+          {/* Deployment (under Customization) */}
+          <button
+            onClick={() => navigate(`/console/${projectId}/deployment`)}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all cursor-pointer ${
+              activeSection === "deployment"
+                ? "bg-crimson text-white shadow-lg shadow-crimson/25"
+                : "text-gray-400 hover:text-white hover:bg-white/5"
+            }`}
+          >
+            <Rocket size={17} />
+            Deployment
           </button>
 
           {/* Project Settings with dropdown */}
@@ -807,6 +841,8 @@ export default function ConsolePage() {
             }
           />
           <Route path="customization" element={<CustomizationSection projectName={projectName} />} />
+          <Route path="analytics" element={<AnalyticsSection />} />
+          <Route path="deployment" element={<DeploymentSection />} />
           <Route
             path="project-settings/general"
             element={
