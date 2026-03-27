@@ -344,9 +344,7 @@ function MessageBubble({ message }) {
     return null;
   }
 
-  const contentWithoutInlineSources = String(message.content || "")
-    .replace(/\s*\[\s*Source[^\]]*\]/gi, "")
-    .trim();
+  const contentWithoutInlineSources = stripInlineLinksFromText(String(message.content || ""));
 
   return (
     <div className={`flex items-start gap-3 ${isUser ? "flex-row-reverse" : ""}`}>
@@ -413,4 +411,20 @@ function MessageBubble({ message }) {
       </div>
     </div>
   );
+}
+
+function stripInlineLinksFromText(text) {
+  let cleaned = String(text || "")
+    .replace(/\s*\[\s*Source[^\]]*\]/gi, "")
+    .replace(/\(\s*https?:\/\/[^\s)]+\s*\)/gi, "")
+    .replace(/https?:\/\/[^\s)]+/gi, "")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  while (cleaned.includes("  ")) {
+    cleaned = cleaned.replace(/  /g, " ");
+  }
+
+  return cleaned;
 }

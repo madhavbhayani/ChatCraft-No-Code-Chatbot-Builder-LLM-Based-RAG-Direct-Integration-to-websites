@@ -253,6 +253,7 @@ export default function CustomizationSection({ projectName = "" }) {
   const [hexError, setHexError] = useState("");
   const [rgbError, setRgbError] = useState("");
   const [fontFamily, setFontFamily] = useState("Roboto");
+  const [chatbotName, setChatbotName] = useState("");
 
   const [saving, setSaving] = useState(false);
   const [loadingSettings, setLoadingSettings] = useState(true);
@@ -295,6 +296,7 @@ export default function CustomizationSection({ projectName = "" }) {
         if (data.font_family) {
           setFontFamily(data.font_family);
         }
+        setChatbotName((data.chatbot_name || "").toString());
         if (data.icon_url) {
           setSelectedIcon({ source: data.icon_source || "uploaded", url: data.icon_url, name: "saved" });
           setUploadedFile(null);
@@ -361,12 +363,17 @@ export default function CustomizationSection({ projectName = "" }) {
       toast.error("Fix validation errors before saving");
       return;
     }
+    if (chatbotName.trim().length > 120) {
+      toast.error("Chatbot name must be 120 characters or fewer");
+      return;
+    }
 
     setSaving(true);
     try {
       const formData = new FormData();
       formData.append("theme_color", themeColor);
       formData.append("font_family", fontFamily);
+      formData.append("chatbot_name", chatbotName.trim());
       formData.append("icon_source", selectedIcon?.source || "none");
 
       if (selectedIcon?.source === "predefined" && selectedIcon?.url) {
@@ -398,6 +405,7 @@ export default function CustomizationSection({ projectName = "" }) {
       }
 
       const nextSource = payload?.icon_source || selectedIcon?.source || "none";
+      setChatbotName((payload?.chatbot_name || "").toString());
       if (nextSource === "none") {
         setSelectedIcon({ source: "none", url: "", name: "" });
       } else if (payload?.icon_url) {
@@ -429,6 +437,7 @@ export default function CustomizationSection({ projectName = "" }) {
     ? (uploadedPreviewUrl || selectedIcon?.url || "")
     : (selectedIcon?.url || "");
   const previewProjectName = projectName?.trim() || "there";
+  const previewChatbotName = chatbotName.trim() || "ChatCraft Assistant";
 
   if (loadingSettings) {
     return (
@@ -461,6 +470,25 @@ export default function CustomizationSection({ projectName = "" }) {
 
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
           <div className="xl:col-span-2 space-y-6">
+            <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+              <div className="px-6 py-4 border-b border-gray-100 bg-gray-50/50">
+                <h3 className="text-sm font-semibold text-charcoal flex items-center gap-2">
+                  <Bot size={15} />
+                  Chatbot Name
+                </h3>
+              </div>
+              <div className="p-6 space-y-2">
+                <input
+                  type="text"
+                  value={chatbotName}
+                  onChange={(event) => setChatbotName(event.target.value.slice(0, 120))}
+                  placeholder="Enter chatbot name"
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crimson/20 focus:border-crimson/40"
+                />
+                <p className="text-xs text-gray-500">This name is used as your chatbot identity. Max 120 characters.</p>
+              </div>
+            </section>
+
             <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
               <div className="px-6 py-4 border-b border-gray-100 bg-gray-50/50">
                 <h3 className="text-sm font-semibold text-charcoal flex items-center gap-2">
@@ -573,12 +601,13 @@ export default function CustomizationSection({ projectName = "" }) {
                     className="max-w-[80%] rounded-2xl rounded-bl-md px-3 py-2 text-sm text-charcoal bg-white border border-gray-200"
                     style={{ fontFamily }}
                   >
-                    Hii! Please tell me what kind of help you want.
+                    Hi! I am {previewChatbotName}. Please tell me what kind of help you want.
                   </div>
                 </div>
               </div>
 
               <div className="mt-4 space-y-2 text-xs text-gray-500">
+                <p><strong>Name:</strong> {previewChatbotName}</p>
                 <p><strong>Color:</strong> <span className="font-mono">{themeColor}</span></p>
                 <p><strong>Font:</strong> {fontFamily}</p>
                 {selectedIcon?.source !== "none" ? <p className="text-green-600">Selected icon ready</p> : null}

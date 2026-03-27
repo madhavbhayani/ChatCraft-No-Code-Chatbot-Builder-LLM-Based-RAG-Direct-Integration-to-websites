@@ -249,6 +249,16 @@ func (h *BotBuilderHandler) SaveBotCustomization(w http.ResponseWriter, r *http.
 	fontFamily := strings.TrimSpace(r.FormValue("font_family"))
 	iconSource := strings.TrimSpace(r.FormValue("icon_source"))
 	selectedIconURL := strings.TrimSpace(r.FormValue("selected_icon_url"))
+	chatbotName := ""
+	chatbotNameProvided := false
+	if vals, ok := r.MultipartForm.Value["chatbot_name"]; ok && len(vals) > 0 {
+		chatbotNameProvided = true
+		chatbotName = strings.TrimSpace(vals[0])
+		if len(chatbotName) > 120 {
+			writeError(w, http.StatusBadRequest, "Chatbot name must be 120 characters or fewer")
+			return
+		}
+	}
 
 	if themeColor == "" || !validateThemeColor(themeColor) {
 		writeError(w, http.StatusBadRequest, "Invalid theme color")
@@ -326,6 +336,21 @@ func (h *BotBuilderHandler) SaveBotCustomization(w http.ResponseWriter, r *http.
 		iconURL = ""
 	}
 
+	if chatbotNameProvided {
+		_, nameErr := h.DB.Pool.Exec(r.Context(),
+			`UPDATE projects
+			 SET bot_name = $1,
+			     updated_at = NOW()
+			 WHERE id = $2`,
+			chatbotName, projectID,
+		)
+		if nameErr != nil {
+			log.Printf("[customization] failed to update chatbot name: %v", nameErr)
+			writeError(w, http.StatusInternalServerError, "Failed to save chatbot name")
+			return
+		}
+	}
+
 	_, execErr := h.DB.Pool.Exec(r.Context(),
 		`INSERT INTO bot_customizations (project_id, icon_url, theme_color, font_family, icon_source, updated_at)
 		 VALUES ($1, $2, $3, $4, $5, NOW())
@@ -343,6 +368,15 @@ func (h *BotBuilderHandler) SaveBotCustomization(w http.ResponseWriter, r *http.
 		return
 	}
 
+	if !chatbotNameProvided {
+		_ = h.DB.Pool.QueryRow(r.Context(),
+			`SELECT COALESCE(bot_name, '')
+			 FROM projects
+			 WHERE id = $1`,
+			projectID,
+		).Scan(&chatbotName)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"message":         "Customization saved successfully",
@@ -351,6 +385,7 @@ func (h *BotBuilderHandler) SaveBotCustomization(w http.ResponseWriter, r *http.
 		"theme_color":     themeColor,
 		"font_family":     fontFamily,
 		"icon_source":     iconSource,
+		"chatbot_name":    chatbotName,
 		"uploaded_to_cdn": iconSource == "uploaded",
 	})
 }
@@ -369,7 +404,18 @@ func (h *BotBuilderHandler) GetBotCustomization(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	var iconURL, themeColor, fontFamily, iconSource string
+	var iconURL, themeColor, fontFamily, iconSource, chatbotName string
+	if err := h.DB.Pool.QueryRow(r.Context(),
+		`SELECT COALESCE(bot_name, '')
+		 FROM projects
+		 WHERE id = $1`,
+		projectID,
+	).Scan(&chatbotName); err != nil {
+		log.Printf("[customization] failed to fetch chatbot name: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to fetch customization")
+		return
+	}
+
 	err := h.DB.Pool.QueryRow(r.Context(),
 		`SELECT icon_url, theme_color, font_family, icon_source
 		 FROM bot_customizations
@@ -385,21 +431,23 @@ func (h *BotBuilderHandler) GetBotCustomization(w http.ResponseWriter, r *http.R
 		// Return defaults when customization has not been saved yet.
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"project_id":  projectID,
-			"icon_url":    "",
-			"theme_color": "#DC2626",
-			"font_family": "Roboto",
-			"icon_source": "none",
+			"project_id":   projectID,
+			"icon_url":     "",
+			"theme_color":  "#DC2626",
+			"font_family":  "Roboto",
+			"icon_source":  "none",
+			"chatbot_name": chatbotName,
 		})
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"project_id":  projectID,
-		"icon_url":    iconURL,
-		"theme_color": themeColor,
-		"font_family": fontFamily,
-		"icon_source": iconSource,
+		"project_id":   projectID,
+		"icon_url":     iconURL,
+		"theme_color":  themeColor,
+		"font_family":  fontFamily,
+		"icon_source":  iconSource,
+		"chatbot_name": chatbotName,
 	})
 }
