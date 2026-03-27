@@ -37,3 +37,10 @@ func (sw *statusWriter) WriteHeader(code int) {
 	sw.statusCode = code
 	sw.ResponseWriter.WriteHeader(code)
 }
+
+// Flush preserves streaming support (SSE/chunked responses) when wrapped by middleware.
+func (sw *statusWriter) Flush() {
+	if f, ok := sw.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}

@@ -247,44 +247,154 @@ export default function ConsolePage() {
     const msg = chatInput.trim();
     if (!msg || sending) return;
 
+    const streamMessageId = crypto.randomUUID();
     setMessages((prev) => [
       ...prev,
       { role: "user", content: msg, timestamp: new Date() },
+      {
+        id: streamMessageId,
+        role: "bot",
+        content: "",
+        sources: [],
+        confidence: 0,
+        fallback: false,
+        streaming: true,
+        timestamp: new Date(),
+      },
     ]);
     setChatInput("");
     setSending(true);
+
+    const updateStreamingMessage = (patch) => {
+      setMessages((prev) =>
+        prev.map((m) => (m.id === streamMessageId ? { ...m, ...patch } : m))
+      );
+    };
+
     try {
       const res = await fetch(`${API}/console/test-chat/${projectId}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Accept: "text/event-stream",
           Authorization: `Bearer ${getToken()}`,
         },
-        body: JSON.stringify({ session_id: sessionId, message: msg }),
+        body: JSON.stringify({ session_id: sessionId, message: msg, stream: true }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Chat failed");
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "bot",
-          content: data.answer,
+
+      const contentType = (res.headers.get("content-type") || "").toLowerCase();
+
+      // Fallback for non-stream responses to preserve backward compatibility.
+      if (!contentType.includes("text/event-stream")) {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Chat failed");
+        updateStreamingMessage({
+          content: data.answer || "",
           sources: data.sources || [],
           confidence: data.confidence,
           fallback: data.fallback,
+          streaming: false,
           timestamp: new Date(),
-        },
-      ]);
+        });
+        return;
+      }
+
+      if (!res.ok) {
+        const raw = await res.text().catch(() => "");
+        throw new Error(raw || "Chat failed");
+      }
+
+      const reader = res.body?.getReader();
+      if (!reader) {
+        throw new Error("Streaming response is unavailable");
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let streamedText = "";
+      let doneReceived = false;
+
+      const processEventBlock = (rawBlock) => {
+        const block = rawBlock.trim();
+        if (!block) return;
+
+        let eventName = "message";
+        const dataLines = [];
+
+        block.split("\n").forEach((line) => {
+          if (line.startsWith("event:")) {
+            eventName = line.slice(6).trim();
+          } else if (line.startsWith("data:")) {
+            dataLines.push(line.slice(5).trimStart());
+          }
+        });
+
+        const dataStr = dataLines.join("\n");
+        let payload = {};
+        if (dataStr) {
+          try {
+            payload = JSON.parse(dataStr);
+          } catch {
+            payload = {};
+          }
+        }
+
+        if (eventName === "token") {
+          const chunk = payload.text || "";
+          if (!chunk) return;
+          streamedText += chunk;
+          updateStreamingMessage({ content: streamedText, streaming: true, error: false });
+          return;
+        }
+
+        if (eventName === "done") {
+          doneReceived = true;
+          updateStreamingMessage({
+            content: payload.answer || streamedText,
+            sources: payload.sources || [],
+            confidence: payload.confidence,
+            fallback: payload.fallback,
+            streaming: false,
+            error: false,
+            timestamp: new Date(),
+          });
+          return;
+        }
+
+        if (eventName === "error") {
+          throw new Error(payload.error || "Streaming failed");
+        }
+      };
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() || "";
+
+        parts.forEach(processEventBlock);
+      }
+
+      if (buffer.trim()) {
+        processEventBlock(buffer);
+      }
+
+      if (!doneReceived) {
+        updateStreamingMessage({
+          content: streamedText || "Sorry, something went wrong. Please try again.",
+          streaming: false,
+          timestamp: new Date(),
+        });
+      }
     } catch (err) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "bot",
-          content: "Sorry, something went wrong. Please try again.",
-          error: true,
-          timestamp: new Date(),
-        },
-      ]);
+      updateStreamingMessage({
+        content: "Sorry, something went wrong. Please try again.",
+        error: true,
+        streaming: false,
+        timestamp: new Date(),
+      });
       toast.error(err.message);
     } finally {
       setSending(false);

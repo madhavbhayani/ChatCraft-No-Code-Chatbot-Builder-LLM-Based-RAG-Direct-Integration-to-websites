@@ -337,6 +337,13 @@ function renderMarkdown(text) {
 
 function MessageBubble({ message }) {
   const isUser = message.role === "user";
+  const rawContent = String(message.content || "");
+
+  // While streaming starts, keep the placeholder hidden until first token arrives.
+  if (!isUser && message.streaming && !message.error && rawContent.trim() === "") {
+    return null;
+  }
+
   const contentWithoutInlineSources = String(message.content || "")
     .replace(/\s*\[\s*Source[^\]]*\]/gi, "")
     .trim();

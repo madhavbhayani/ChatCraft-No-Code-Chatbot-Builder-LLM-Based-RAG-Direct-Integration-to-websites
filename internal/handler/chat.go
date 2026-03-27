@@ -45,6 +45,7 @@ func NewChatHandler(db *database.DB) *ChatHandler {
 type ChatRequest struct {
 	SessionID string `json:"session_id"`
 	Message   string `json:"message"`
+	Stream    bool   `json:"stream,omitempty"`
 }
 
 // ChatResponse is the JSON response for the chat endpoint.
@@ -81,6 +82,7 @@ func (h *ChatHandler) Chat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
+	streamMode := req.Stream || strings.Contains(strings.ToLower(r.Header.Get("Accept")), "text/event-stream")
 
 	// Step 1: Resolve project from bot_token (bot_token = project_id for now)
 	var projectID, encryptedKey, systemPrompt, botName, llmModel string
@@ -231,6 +233,21 @@ func (h *ChatHandler) Chat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(results) == 0 {
+		var (
+			sseFlusher      http.Flusher
+			sseReady        bool
+			didStreamTokens bool
+		)
+		if streamMode {
+			var ok bool
+			sseFlusher, ok = prepareSSE(w)
+			if !ok {
+				writeError(w, http.StatusInternalServerError, "Streaming is not supported")
+				return
+			}
+			sseReady = true
+		}
+
 		// No relevant results — use configured fallback, optionally with custom contact fields.
 		if fallbackResponseEnabled {
 			base := strings.TrimSpace(fallbackResponseText)
@@ -258,27 +275,67 @@ Still try to be helpful — suggest they rephrase or provide more context.
 Be concise, friendly, and professional. Keep response under 80 words.`,
 				assistantName,
 			)
-			fallbackAnswer, err := callGemini(ctx, apiKey, llmModel, fallbackPrompt, req.Message)
-			if err != nil {
-				log.Printf("[chat] fallback LLM error: %v", err)
-				response.Answer = "I don't have specific information about that in my knowledge base. Could you try rephrasing your question, or reach out to support for more help?"
+
+			if streamMode {
+				streamedAnswer, streamErr := callGeminiStream(ctx, apiKey, llmModel, fallbackPrompt, req.Message, func(chunk string) error {
+					if chunk == "" {
+						return nil
+					}
+					didStreamTokens = true
+					return writeSSEEvent(w, sseFlusher, "token", map[string]string{"text": chunk})
+				})
+
+				if streamErr != nil {
+					log.Printf("[chat] fallback streaming LLM error: %v", streamErr)
+					if strings.TrimSpace(streamedAnswer) == "" {
+						streamedAnswer = "I don't have specific information about that in my knowledge base. Could you try rephrasing your question, or reach out to support for more help?"
+						didStreamTokens = true
+						_ = writeSSEEvent(w, sseFlusher, "token", map[string]string{"text": streamedAnswer})
+					}
+				}
+
+				response.Answer = stripSourcesSection(streamedAnswer)
 			} else {
-				response.Answer = fallbackAnswer
+				fallbackAnswer, llmErr := callGemini(ctx, apiKey, llmModel, fallbackPrompt, req.Message)
+				if llmErr != nil {
+					log.Printf("[chat] fallback LLM error: %v", llmErr)
+					response.Answer = "I don't have specific information about that in my knowledge base. Could you try rephrasing your question, or reach out to support for more help?"
+				} else {
+					response.Answer = fallbackAnswer
+				}
 			}
 		}
 		response.Fallback = true
 		response.Sources = []string{}
+		if strings.TrimSpace(response.Answer) == "" {
+			response.Answer = "I don't have that information in my knowledge base. Please contact support."
+		}
 
 		// Store conversation
 		h.storeConversation(ctx, projectID, req.SessionID, req.Message, response.Answer, 0, true)
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		if streamMode {
+			if sseReady {
+				if !didStreamTokens {
+					_ = writeSSEEvent(w, sseFlusher, "token", map[string]string{"text": response.Answer})
+				}
+				_ = writeSSEEvent(w, sseFlusher, "done", response)
+			}
+		} else {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(response)
+		}
 		return
 	}
 
-	// Step 6: MMR rerank + build structured labelled context
-	topResults := mmrRerank(results, 5, 0.7)
+	// Step 6: MMR rerank + build structured labelled context.
+	// Use more than a fixed 5 chunks so broad questions (e.g., "all pricing")
+	// can include complete details present in the knowledge base.
+	topK := ragCfg.MaxContextChunks
+	if topK < 5 {
+		topK = 5
+	}
+	topResults := mmrRerank(results, topK, 0.8)
 
 	var contextParts []string
 	sourceURLsByNumber := make([]string, len(topResults))
@@ -328,7 +385,10 @@ RULES:
 9. If the user explicitly asks for a table/comparison, respond with a markdown table whenever the context allows.
 10. Use valid markdown table syntax with a header row, a separator row (---), and data rows.
 11. Use tables for structured/comparable data; otherwise use normal text.
-12. Keep tables concise (recommended max 5 columns, max 8 rows).`,
+12. Keep tables concise (recommended max 5 columns, max 8 rows).
+13. Never return a vague one-line summary when the context contains concrete facts.
+14. If context includes numeric details (prices, limits, dates, counts), include those exact values.
+15. If the user asks for "all", "complete", or "full" details, list every relevant item found in the provided context.`,
 			assistantName,
 		)
 	}
@@ -345,14 +405,51 @@ RULES:
 
 	fullSystemPrompt := sysPrompt + "\n\n" + tableGuidance + "\n\nContext:\n" + contextText
 
-	// Call Gemini generative model
+	if streamMode {
+		flusher, ok := prepareSSE(w)
+		if !ok {
+			writeError(w, http.StatusInternalServerError, "Streaming is not supported")
+			return
+		}
+
+		answer, streamErr := callGeminiStream(ctx, apiKey, llmModel, fullSystemPrompt, req.Message, func(chunk string) error {
+			if chunk == "" {
+				return nil
+			}
+			return writeSSEEvent(w, flusher, "token", map[string]string{"text": chunk})
+		})
+
+		if streamErr != nil {
+			log.Printf("[chat] Gemini streaming LLM error: %v", streamErr)
+			if strings.TrimSpace(answer) == "" {
+				response.Answer = "I'm having trouble generating a response right now. Please try again."
+				response.Fallback = true
+				_ = writeSSEEvent(w, flusher, "token", map[string]string{"text": response.Answer})
+			} else {
+				response.Answer = replaceSourceReferencesWithLinks(stripSourcesSection(answer), sourceURLsByNumber)
+			}
+		} else {
+			response.Answer = replaceSourceReferencesWithLinks(stripSourcesSection(answer), sourceURLsByNumber)
+		}
+
+		if response.Sources == nil {
+			response.Sources = []string{}
+		}
+
+		// Store conversation
+		h.storeConversation(ctx, projectID, req.SessionID, req.Message, response.Answer, topScore, response.Fallback)
+		_ = writeSSEEvent(w, flusher, "done", response)
+		return
+	}
+
+	// Call Gemini generative model (non-streaming mode)
 	answer, err := callGemini(ctx, apiKey, llmModel, fullSystemPrompt, req.Message)
 	if err != nil {
 		log.Printf("[chat] Gemini LLM error: %v", err)
 		response.Answer = "I'm having trouble generating a response right now. Please try again."
 		response.Fallback = true
 	} else {
-		response.Answer = stripSourcesSection(answer)
+		response.Answer = replaceSourceReferencesWithLinks(stripSourcesSection(answer), sourceURLsByNumber)
 	}
 
 	if response.Sources == nil {
@@ -512,6 +609,88 @@ func callGemini(ctx context.Context, apiKey, modelName, systemPrompt, userMessag
 	}
 
 	return strings.TrimSpace(answer.String()), nil
+}
+
+// callGeminiStream streams model output and invokes onChunk for each text delta.
+func callGeminiStream(ctx context.Context, apiKey, modelName, systemPrompt, userMessage string, onChunk func(string) error) (string, error) {
+	client, err := genai.NewClient(ctx, &genai.ClientConfig{
+		APIKey:  apiKey,
+		Backend: genai.BackendGeminiAPI,
+	})
+	if err != nil {
+		return "", fmt.Errorf("create client: %w", err)
+	}
+
+	var fullAnswer string
+	stream := client.Models.GenerateContentStream(ctx, modelName, []*genai.Content{
+		genai.NewContentFromText(userMessage, genai.RoleUser),
+	}, &genai.GenerateContentConfig{
+		SystemInstruction: genai.NewContentFromText(systemPrompt, genai.RoleUser),
+		MaxOutputTokens:   2048,
+		Temperature:       genai.Ptr[float32](0.2),
+	})
+
+	for chunkResp, chunkErr := range stream {
+		if chunkErr != nil {
+			return strings.TrimSpace(fullAnswer), fmt.Errorf("generate content stream: %w", chunkErr)
+		}
+		if chunkResp == nil {
+			continue
+		}
+
+		text := chunkResp.Text()
+		if text == "" {
+			continue
+		}
+
+		delta := text
+		if strings.HasPrefix(text, fullAnswer) {
+			delta = strings.TrimPrefix(text, fullAnswer)
+			fullAnswer = text
+		} else {
+			fullAnswer += text
+		}
+
+		if delta == "" {
+			continue
+		}
+		if onChunk != nil {
+			if err := onChunk(delta); err != nil {
+				return strings.TrimSpace(fullAnswer), err
+			}
+		}
+	}
+
+	return strings.TrimSpace(fullAnswer), nil
+}
+
+func prepareSSE(w http.ResponseWriter) (http.Flusher, bool) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		return nil, false
+	}
+
+	headers := w.Header()
+	headers.Set("Content-Type", "text/event-stream")
+	headers.Set("Cache-Control", "no-cache")
+	headers.Set("Connection", "keep-alive")
+	headers.Set("X-Accel-Buffering", "no")
+
+	flusher.Flush()
+	return flusher, true
+}
+
+func writeSSEEvent(w http.ResponseWriter, flusher http.Flusher, event string, payload interface{}) error {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, data); err != nil {
+		return err
+	}
+	flusher.Flush()
+	return nil
 }
 
 // storeConversation saves a chat exchange to the conversations table.
