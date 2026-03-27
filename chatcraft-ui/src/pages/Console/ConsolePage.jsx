@@ -55,6 +55,14 @@ import {
 
 const API = "/api/v1";
 
+async function safeReadJson(response) {
+  try {
+    return await response.json();
+  } catch {
+    return {};
+  }
+}
+
 // ─── Main Console Page ───────────────────────────────────────────────────────
 
 export default function ConsolePage() {
@@ -133,10 +141,19 @@ export default function ConsolePage() {
             headers: { Authorization: `Bearer ${getToken()}` },
           }),
         ]);
-        const projData = await projRes.json();
+
+        const [projData, status] = await Promise.all([
+          safeReadJson(projRes),
+          safeReadJson(statusRes),
+        ]);
+
+        if (!projRes.ok) {
+          throw new Error(projData?.error || "Failed to fetch project");
+        }
+
         if (projData.project) setProjectName(projData.project.name);
+
         if (statusRes.ok) {
-          const status = await statusRes.json();
           setStatusData(status);
           // Redirect incomplete setups only once per project for better UX.
           if (status.setup_step < 3) {
@@ -150,6 +167,8 @@ export default function ConsolePage() {
               return;
             }
           }
+        } else {
+          throw new Error(status?.error || "Failed to fetch setup status");
         }
       } catch (err) {
         console.error("Failed to fetch project data:", err);

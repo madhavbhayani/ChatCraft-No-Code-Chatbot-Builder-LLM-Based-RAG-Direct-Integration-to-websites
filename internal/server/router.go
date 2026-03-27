@@ -51,6 +51,11 @@ func NewRouter(db *database.DB) http.Handler {
 
 	// Bot Builder / Console (protected)
 	botBuilder := handler.NewBotBuilderHandler(db)
+
+	// Embed widget (public)
+	mux.HandleFunc("GET /api/v1/embed/script.js", botBuilder.GetEmbedScript)
+	mux.HandleFunc("GET /api/v1/embed/config/{project_id}", botBuilder.GetPublicEmbedConfig)
+
 	mux.Handle("POST /api/v1/console/status/{project_id}", authMw(http.HandlerFunc(botBuilder.GetSetupStatus)))
 	mux.Handle("POST /api/v1/console/discover-subdomains/{project_id}", authMw(http.HandlerFunc(botBuilder.DiscoverSubdomains)))
 	mux.Handle("POST /api/v1/console/crawl/{project_id}", authMw(http.HandlerFunc(botBuilder.CrawlWebsite)))
@@ -71,6 +76,7 @@ func NewRouter(db *database.DB) http.Handler {
 	mux.Handle("POST /api/v1/console/customization/{project_id}", authMw(http.HandlerFunc(botBuilder.GetBotCustomization)))
 	mux.Handle("PUT /api/v1/console/customization/{project_id}", authMw(http.HandlerFunc(botBuilder.SaveBotCustomization)))
 	mux.Handle("POST /api/v1/console/realtime-analytics/{project_id}", authMw(http.HandlerFunc(botBuilder.GetProjectAnalytics)))
+	mux.Handle("GET /api/v1/console/deploy/{project_id}", authMw(http.HandlerFunc(botBuilder.GetDeploymentStatus)))
 	mux.Handle("POST /api/v1/console/deploy/{project_id}", authMw(http.HandlerFunc(botBuilder.DeployProjectBot)))
 	mux.Handle("PUT /api/v1/console/model/{project_id}", authMw(http.HandlerFunc(botBuilder.SaveModelSelection)))
 	mux.Handle("DELETE /api/v1/console/data/{project_id}", authMw(http.HandlerFunc(botBuilder.DeleteProjectData)))

@@ -417,6 +417,52 @@ func truncateAnalyticsTitle(question string) string {
 	return q[:80] + "..."
 }
 
+// GetDeploymentStatus returns the persisted deployment status for a project.
+func (h *BotBuilderHandler) GetDeploymentStatus(w http.ResponseWriter, r *http.Request) {
+	userID := r.Header.Get("X-User-ID")
+	projectID := r.PathValue("project_id")
+	if projectID == "" {
+		writeError(w, http.StatusBadRequest, "Project ID is required")
+		return
+	}
+
+	if err := verifyProjectOwnership(r.Context(), h.DB, projectID, userID); err != nil {
+		writeError(w, http.StatusForbidden, "Not your project")
+		return
+	}
+
+	deployed := false
+	status := "draft"
+	var deployedAt *time.Time
+
+	err := h.DB.Pool.QueryRow(r.Context(),
+		`SELECT COALESCE(is_deployed, false), COALESCE(status, 'draft'), deployed_at
+		 FROM bots
+		 WHERE project_id = $1
+		 ORDER BY updated_at DESC
+		 LIMIT 1`,
+		projectID,
+	).Scan(&deployed, &status, &deployedAt)
+	if err != nil {
+		if err != pgx.ErrNoRows {
+			log.Printf("[deploy] status lookup failed: %v", err)
+			writeError(w, http.StatusInternalServerError, "Failed to fetch deployment status")
+			return
+		}
+		deployed = false
+		status = "draft"
+		deployedAt = nil
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"project_id":  projectID,
+		"deployed":    deployed,
+		"status":      status,
+		"deployed_at": deployedAt,
+	})
+}
+
 // DeployProjectBot stores deployment state for the bot associated with the project.
 func (h *BotBuilderHandler) DeployProjectBot(w http.ResponseWriter, r *http.Request) {
 	userID := r.Header.Get("X-User-ID")
@@ -475,23 +521,51 @@ func (h *BotBuilderHandler) DeployProjectBot(w http.ResponseWriter, r *http.Requ
 		deployedAt = now
 	}
 
-	_, err = h.DB.Pool.Exec(r.Context(),
-		`INSERT INTO bots (user_id, project_id, name, description, status, bot_token, settings, is_deployed, deployed_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, NOW())
-		 ON CONFLICT (project_id)
-		 DO UPDATE SET user_id = EXCLUDED.user_id,
-		               name = EXCLUDED.name,
-		               description = EXCLUDED.description,
-		               status = EXCLUDED.status,
-		               bot_token = EXCLUDED.bot_token,
-		               settings = EXCLUDED.settings,
-		               is_deployed = EXCLUDED.is_deployed,
-		               deployed_at = EXCLUDED.deployed_at,
-		               updated_at = NOW()`,
+	tx, err := h.DB.Pool.Begin(r.Context())
+	if err != nil {
+		log.Printf("[deploy] tx begin failed: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to update deployment state")
+		return
+	}
+	defer func() {
+		_ = tx.Rollback(r.Context())
+	}()
+
+	updateResult, err := tx.Exec(r.Context(),
+		`UPDATE bots
+		 SET user_id = $1,
+		     name = $3,
+		     description = $4,
+		     status = $5,
+		     bot_token = $6,
+		     settings = $7::jsonb,
+		     is_deployed = $8,
+		     deployed_at = $9,
+		     updated_at = NOW()
+		 WHERE project_id = $2`,
 		userID, projectID, projectName, projectDescription, status, projectID, string(settingsJSON), deployed, deployedAt,
 	)
 	if err != nil {
-		log.Printf("[deploy] upsert failed: %v", err)
+		log.Printf("[deploy] update failed: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to update deployment state")
+		return
+	}
+
+	if updateResult.RowsAffected() == 0 {
+		_, err = tx.Exec(r.Context(),
+			`INSERT INTO bots (id, user_id, project_id, name, description, status, bot_token, settings, is_deployed, deployed_at, created_at, updated_at)
+			 VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, NOW(), NOW())`,
+			userID, projectID, projectName, projectDescription, status, projectID, string(settingsJSON), deployed, deployedAt,
+		)
+		if err != nil {
+			log.Printf("[deploy] insert failed: %v", err)
+			writeError(w, http.StatusInternalServerError, "Failed to update deployment state")
+			return
+		}
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		log.Printf("[deploy] tx commit failed: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to update deployment state")
 		return
 	}
