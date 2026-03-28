@@ -41,6 +41,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { getSession, isLoggedIn } from "../../utils/auth";
+import { apiUrl } from "../../utils/api";
 import KnowledgeBaseSection from "../KnowledgeBase/KnowledgeBaseSection";
 import TestChatSection from "../TestChat/TestChatSection";
 import CustomizationSection from "../Customization/CustomizationSection";
@@ -53,7 +54,7 @@ import {
   PSBehavior,
 } from "../ProjectSettings/ProjectSettingsSection";
 
-const API = "/api/v1";
+const API = apiUrl("/api/v1");
 
 async function safeReadJson(response) {
   try {

@@ -3,8 +3,9 @@ import { useParams } from "react-router-dom";
 import { Palette, Type, Bot, Check, Upload, Search, Save, X, User, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { getSession } from "../../utils/auth";
+import { apiUrl } from "../../utils/api";
 
-const API = "/api/v1";
+const API = apiUrl("/api/v1");
 const DEFAULT_THEME_COLOR = "#DC2626";
 const DEFAULT_USER_FONT_COLOR = "#FFFFFF";
 const DEFAULT_BOT_FONT_COLOR = "#111827";

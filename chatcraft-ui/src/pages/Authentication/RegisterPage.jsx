@@ -5,6 +5,9 @@ import { toast } from "sonner";
 import { saveSession } from "../../utils/auth";
 import { signInWithGoogle } from "../../firebase";
 import GoogleSignInButton from "../../components/GoogleSignInButton";
+import { apiUrl } from "../../utils/api";
+
+const API = apiUrl("/api/v1");
 
 export default function RegisterPage() {
   const navigate = useNavigate();
@@ -21,7 +24,7 @@ export default function RegisterPage() {
     try {
       const { idToken, user: firebaseUser } = await signInWithGoogle();
 
-      const res = await fetch("/api/v1/auth/google", {
+      const res = await fetch(`${API}/auth/google`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id_token: idToken }),
@@ -69,7 +72,7 @@ export default function RegisterPage() {
 
     setLoading(true);
     try {
-      const res = await fetch("/api/v1/auth/register", {
+      const res = await fetch(`${API}/auth/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

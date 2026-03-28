@@ -2,6 +2,9 @@ import { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { ArrowLeft, Lock, Loader2, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
+import { apiUrl } from "../../utils/api";
+
+const API = apiUrl("/api/v1");
 
 export default function ResetPasswordPage() {
   const navigate = useNavigate();
@@ -49,7 +52,7 @@ export default function ResetPasswordPage() {
 
     setLoading(true);
     try {
-      const res = await fetch("/api/v1/auth/reset-password", {
+      const res = await fetch(`${API}/auth/reset-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

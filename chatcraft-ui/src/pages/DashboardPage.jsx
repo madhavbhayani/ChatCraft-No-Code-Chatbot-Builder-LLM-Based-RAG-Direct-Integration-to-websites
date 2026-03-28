@@ -14,6 +14,9 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { getSession, clearSession, isLoggedIn } from "../utils/auth";
+import { apiUrl } from "../utils/api";
+
+const API = apiUrl("/api/v1");
 
 export default function DashboardPage() {
   const navigate = useNavigate();
@@ -54,7 +57,7 @@ export default function DashboardPage() {
 
   const fetchProject = async (token) => {
     try {
-      const res = await fetch("/api/v1/projects", {
+      const res = await fetch(`${API}/projects`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token || getToken()}` },
       });
@@ -84,7 +87,7 @@ export default function DashboardPage() {
 
     setCreating(true);
     try {
-      const res = await fetch("/api/v1/projects/create", {
+      const res = await fetch(`${API}/projects/create`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -121,7 +124,7 @@ export default function DashboardPage() {
 
     setDeleting(true);
     try {
-      const res = await fetch("/api/v1/projects", {
+      const res = await fetch(`${API}/projects`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${getToken()}` },
       });

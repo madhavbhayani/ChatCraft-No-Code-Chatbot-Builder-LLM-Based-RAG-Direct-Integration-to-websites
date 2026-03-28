@@ -2,6 +2,9 @@ import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft, Mail, Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
+import { apiUrl } from "../../utils/api";
+
+const API = apiUrl("/api/v1");
 
 export default function ForgotPasswordPage() {
   const navigate = useNavigate();
@@ -34,7 +37,7 @@ export default function ForgotPasswordPage() {
 
     setSendingOtp(true);
     try {
-      const res = await fetch("/api/v1/auth/forgot-password", {
+      const res = await fetch(`${API}/auth/forgot-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),
@@ -59,7 +62,7 @@ export default function ForgotPasswordPage() {
     if (cooldown > 0) return;
     setResending(true);
     try {
-      const res = await fetch("/api/v1/auth/forgot-password", {
+      const res = await fetch(`${API}/auth/forgot-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),

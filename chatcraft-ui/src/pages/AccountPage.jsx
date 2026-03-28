@@ -16,6 +16,9 @@ import {
 import { toast } from "sonner";
 import { getSession, saveSession, clearSession, isLoggedIn } from "../utils/auth";
 import { signInWithGoogle } from "../firebase";
+import { apiUrl } from "../utils/api";
+
+const API = apiUrl("/api/v1");
 
 export default function AccountPage() {
   const navigate = useNavigate();
@@ -57,7 +60,7 @@ export default function AccountPage() {
 
   const fetchAccount = async () => {
     try {
-      const res = await fetch("/api/v1/account", {
+      const res = await fetch(`${API}/account`, {
         headers: { Authorization: `Bearer ${getToken()}` },
       });
       const data = await res.json();
@@ -77,7 +80,7 @@ export default function AccountPage() {
     try {
       const { idToken } = await signInWithGoogle();
 
-      const res = await fetch("/api/v1/account/link-google", {
+      const res = await fetch(`${API}/account/link-google`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -114,7 +117,7 @@ export default function AccountPage() {
 
     setSettingPassword(true);
     try {
-      const res = await fetch("/api/v1/account/setup-password", {
+      const res = await fetch(`${API}/account/setup-password`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -147,7 +150,7 @@ export default function AccountPage() {
 
     setSendingEmailOtp(true);
     try {
-      const res = await fetch("/api/v1/account/change-email", {
+      const res = await fetch(`${API}/account/change-email`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -177,7 +180,7 @@ export default function AccountPage() {
 
     setConfirmingEmail(true);
     try {
-      const res = await fetch("/api/v1/account/confirm-email", {
+      const res = await fetch(`${API}/account/confirm-email`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -213,7 +216,7 @@ export default function AccountPage() {
   const handleDeleteAccount = async () => {
     setDeletingAccount(true);
     try {
-      const res = await fetch("/api/v1/account", {
+      const res = await fetch(`${API}/account`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${getToken()}` },
       });

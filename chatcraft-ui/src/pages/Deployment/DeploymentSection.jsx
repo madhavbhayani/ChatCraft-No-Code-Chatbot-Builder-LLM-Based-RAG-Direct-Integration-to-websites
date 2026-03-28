@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import { Rocket, Loader2, Copy, Check, Code2, Hash, Link2 } from "lucide-react";
+import { Rocket, Loader2, Copy, Check, Code2, Hash } from "lucide-react";
 import { toast } from "sonner";
 import { getSession } from "../../utils/auth";
+import { API_BASE, apiUrl } from "../../utils/api";
 
-const API = "/api/v1";
+const API = apiUrl("/api/v1");
 
 export default function DeploymentSection() {
   const { projectId } = useParams();
@@ -12,10 +13,6 @@ export default function DeploymentSection() {
   const [submitting, setSubmitting] = useState(false);
   const [deployState, setDeployState] = useState("draft");
   const [copied, setCopied] = useState(false);
-  const [scriptHost, setScriptHost] = useState(() => {
-    if (typeof window === "undefined") return "http://localhost:8080";
-    return window.location.origin;
-  });
 
   const token = getSession()?.token || "";
 
@@ -48,17 +45,9 @@ export default function DeploymentSection() {
     fetchDeploymentStatus();
   }, [projectId, token]);
 
-  const normalizedHost = useMemo(() => {
-    const raw = String(scriptHost || "").trim();
-    if (!raw) return "";
-    return raw.replace(/\/$/, "");
-  }, [scriptHost]);
-
-  const scriptTag = useMemo(() => {
-    if (!projectId || !normalizedHost) return "";
-
-    return `<script src="${normalizedHost}/api/v1/embed/script.js?project_id=${projectId}" data-project-id="${projectId}" defer></script>`;
-  }, [normalizedHost, projectId]);
+  const scriptTag = projectId
+    ? `<script src="${apiUrl(`/api/v1/embed/script.js?project_id=${projectId}`)}" data-project-id="${projectId}" defer></script>`
+    : "";
 
   const copyScriptTag = async () => {
     if (!scriptTag) return;
@@ -179,24 +168,13 @@ export default function DeploymentSection() {
             <p className="text-sm text-gray-600">
               Paste this script tag in your website HTML (before <code>&lt;/body&gt;</code>). It auto-initializes the chatbot widget with your deployed settings.
             </p>
-
-            <div className="space-y-2">
-              <label className="text-xs font-medium text-gray-600 flex items-center gap-1.5">
-                <Link2 size={12} />
-                API/Backend Host (for localhost use your running backend URL)
-              </label>
-              <input
-                type="text"
-                value={scriptHost}
-                onChange={(e) => setScriptHost(e.target.value)}
-                placeholder="http://localhost:8080"
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-crimson/20 focus:border-crimson/40"
-              />
-            </div>
+            {/* <p className="text-xs text-gray-500">
+              Backend host: <span className="font-mono">{API_BASE}</span>
+            </p> */}
 
             <div className="rounded-xl border border-gray-200 bg-[#0B1020] p-4">
               <pre className="text-xs leading-relaxed text-[#F8FAFC] whitespace-pre-wrap break-all">
-                {scriptTag || "Enter a valid host and project ID to generate script tag"}
+                {scriptTag || "Project ID required to generate script tag"}
               </pre>
             </div>
 

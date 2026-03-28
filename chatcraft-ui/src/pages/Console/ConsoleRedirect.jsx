@@ -2,6 +2,9 @@ import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import { getSession, isLoggedIn } from "../../utils/auth";
+import { apiUrl } from "../../utils/api";
+
+const API = apiUrl("/api/v1");
 
 /**
  * ConsoleRedirect - When user visits /console, fetch their project
@@ -18,7 +21,7 @@ export default function ConsoleRedirect() {
     }
 
     const session = getSession();
-    fetch("/api/v1/projects", {
+    fetch(`${API}/projects`, {
       method: "POST",
       headers: { Authorization: `Bearer ${session?.token}` },
     })

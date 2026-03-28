@@ -3,6 +3,9 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { ArrowLeft, Mail, Loader2, CheckCircle2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { getSession, saveSession } from "../../utils/auth";
+import { apiUrl } from "../../utils/api";
+
+const API = apiUrl("/api/v1");
 
 export default function VerifyEmailPage() {
   const navigate = useNavigate();
@@ -92,7 +95,7 @@ export default function VerifyEmailPage() {
 
     setVerifying(true);
     try {
-      const res = await fetch("/api/v1/auth/verify-otp", {
+      const res = await fetch(`${API}/auth/verify-otp`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, otp: code }),
@@ -127,7 +130,7 @@ export default function VerifyEmailPage() {
     setResending(true);
 
     try {
-      const res = await fetch("/api/v1/auth/send-otp", {
+      const res = await fetch(`${API}/auth/send-otp`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),

@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { BarChart3, ExternalLink, Loader2 } from "lucide-react";
 import { getSession } from "../../utils/auth";
+import { apiUrl } from "../../utils/api";
 
-const API = "/api/v1";
+const API = apiUrl("/api/v1");
 
 export default function AnalyticsSection() {
   const { projectId } = useParams();

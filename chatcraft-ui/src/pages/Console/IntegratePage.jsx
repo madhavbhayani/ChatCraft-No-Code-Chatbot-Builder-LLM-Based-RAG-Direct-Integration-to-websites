@@ -28,8 +28,9 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { getSession, isLoggedIn } from "../../utils/auth";
+import { apiUrl } from "../../utils/api";
 
-const API = "/api/v1";
+const API = apiUrl("/api/v1");
 
 const STEPS = [
   { id: 1, title: "API Key", desc: "Add your Gemini API key for embeddings", icon: Key },
