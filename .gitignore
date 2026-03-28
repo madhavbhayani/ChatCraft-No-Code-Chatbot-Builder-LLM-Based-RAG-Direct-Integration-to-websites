@@ -8,7 +8,7 @@ firebase-admin-sdk.json
 *.so
 *.dylib
 /tmp/
-
+npm-package-chatcraft/
 # Frontend
 chatcraft-ui/node_modules/
 chatcraft-ui/dist/

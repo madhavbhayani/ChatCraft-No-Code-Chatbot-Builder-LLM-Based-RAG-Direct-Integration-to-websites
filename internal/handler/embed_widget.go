@@ -162,6 +162,12 @@ const embedWidgetScript = `(function () {
 
   var sessionId = 'cc_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
 
+  var loadedFontsRegistry = window.__chatcraftLoadedGoogleFonts;
+  if (!loadedFontsRegistry) {
+    loadedFontsRegistry = {};
+    window.__chatcraftLoadedGoogleFonts = loadedFontsRegistry;
+  }
+
   var config = {
     chatbot_name: 'Chatbot',
     theme_color: '#DC2626',
@@ -179,7 +185,7 @@ const embedWidgetScript = `(function () {
   })
     .then(function (res) {
       if (!res.ok) {
-        throw new Error('Failed to fetch widget config');
+        throw new Error('Widget is unavailable (bot not deployed).');
       }
       return res.json();
     })
@@ -187,13 +193,53 @@ const embedWidgetScript = `(function () {
       if (data && typeof data === 'object') {
         config = Object.assign(config, data);
       }
-    })
-    .catch(function () {
-      // Widget still initializes with defaults for resilience.
-    })
-    .finally(function () {
       initializeWidget();
+    })
+    .catch(function (err) {
+      console.error('[ChatCraft] Widget disabled:', err && err.message ? err.message : 'Config fetch failed');
     });
+
+  function toFontQueryFamily(fontName) {
+    return String(fontName || '')
+      .trim()
+      .replace(/\s+/g, '+')
+      .replace(/[^A-Za-z0-9+\-]/g, '');
+  }
+
+  function loadGoogleFont(fontName) {
+    var name = String(fontName || '').trim();
+    if (!name || typeof document === 'undefined' || !document.head) {
+      return;
+    }
+    if (loadedFontsRegistry[name]) {
+      return;
+    }
+
+    var family = toFontQueryFamily(name);
+    if (!family) {
+      return;
+    }
+
+    var link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = 'https://fonts.googleapis.com/css2?family=' + family + ':wght@400;500;600;700&display=swap';
+    document.head.appendChild(link);
+    loadedFontsRegistry[name] = true;
+  }
+
+  function buildFontStack(fontName) {
+    var name = String(fontName || '').trim();
+    if (!name) {
+      return 'Roboto, system-ui, -apple-system, Segoe UI, sans-serif';
+    }
+
+    // Preserve explicit stacks if provided by configuration.
+    if (name.indexOf(',') >= 0) {
+      return name;
+    }
+
+    return '"' + name.replace(/"/g, '') + '", system-ui, -apple-system, Segoe UI, sans-serif';
+  }
 
   function initializeWidget() {
     var root = document.createElement('div');
@@ -206,31 +252,47 @@ const embedWidgetScript = `(function () {
       '<style>' +
       ':host{all:initial;}' +
       '.cc-container{position:fixed;right:18px;bottom:18px;z-index:2147483000;display:flex;flex-direction:column;align-items:flex-end;font-family:var(--cc-font);}' +
-      '.cc-panel{width:360px;max-width:calc(100vw - 24px);height:500px;max-height:72vh;background:#fff;border:1px solid #E5E7EB;border-radius:16px;box-shadow:0 14px 40px rgba(15,23,42,.22);display:none;overflow:hidden;margin-bottom:12px;}' +
-      '.cc-panel.open{display:flex;flex-direction:column;}' +
+      '.cc-panel{position:absolute;right:0;bottom:84px;width:360px;max-width:calc(100vw - 24px);height:500px;max-height:72vh;background:#fff;border:1px solid #E5E7EB;border-radius:16px;box-shadow:0 14px 40px rgba(15,23,42,.22);display:flex;flex-direction:column;overflow:hidden;opacity:0;transform:translateY(22px) scale(.98);transform-origin:bottom right;visibility:hidden;pointer-events:none;transition:opacity .24s ease, transform .24s cubic-bezier(.22,1,.36,1), visibility 0s linear .24s;}' +
+      '.cc-panel.open{opacity:1;transform:translateY(0) scale(1);visibility:visible;pointer-events:auto;transition:opacity .24s ease, transform .24s cubic-bezier(.22,1,.36,1), visibility 0s;}' +
       '.cc-header{background:#111827;color:#fff;padding:12px 14px;display:flex;align-items:center;justify-content:space-between;font-size:14px;font-weight:700;}' +
       '.cc-close{appearance:none;border:none;background:transparent;color:#fff;font-size:18px;line-height:1;cursor:pointer;padding:0 2px;}' +
-      '.cc-messages{flex:1;overflow:auto;background:#F9FAFB;padding:10px;}' +
-      '.cc-msg-row{display:flex;margin:8px 0;}' +
+      '.cc-messages{flex:1;overflow:auto;background:#F9FAFB;padding:12px;}' +
+      '.cc-msg-row{display:flex;align-items:flex-end;gap:8px;margin:10px 0;}' +
       '.cc-msg-row.user{justify-content:flex-end;}' +
-      '.cc-msg{max-width:85%;padding:9px 11px;border-radius:12px;font-size:13px;line-height:1.45;white-space:pre-wrap;word-break:break-word;}' +
-      '.cc-msg-row.user .cc-msg{background:#111827;color:var(--cc-user-text);border-bottom-right-radius:4px;}' +
+      '.cc-avatar{width:28px;height:28px;border-radius:999px;flex:0 0 28px;display:flex;align-items:center;justify-content:center;overflow:hidden;}' +
+      '.cc-avatar.bot{background:#F3F4F6;border:1px solid #E5E7EB;}' +
+      '.cc-avatar.bot img{width:100%;height:100%;object-fit:cover;border-radius:999px;display:block;}' +
+      '.cc-avatar.user{background:#111827;color:#fff;}' +
+      '.cc-avatar.user svg{width:14px;height:14px;display:block;}' +
+      '.cc-msg{max-width:82%;padding:9px 11px;border-radius:12px;font-size:13px;line-height:1.45;word-break:break-word;font-family:inherit;}' +
+      '.cc-msg-row.user .cc-msg{background:var(--cc-theme);color:var(--cc-user-text);border-bottom-right-radius:4px;}' +
       '.cc-msg-row.bot .cc-msg{background:#fff;color:var(--cc-bot-text);border:1px solid #E5E7EB;border-bottom-left-radius:4px;}' +
-      '.cc-sources{margin-top:7px;padding-top:7px;border-top:1px solid #F1F5F9;font-size:11px;}' +
-      '.cc-sources-label{color:#6B7280;margin-bottom:4px;}' +
-      '.cc-sources-list{display:flex;gap:8px;flex-wrap:wrap;}' +
-      '.cc-sources-list a{color:#2563EB;text-decoration:none;}' +
-      '.cc-sources-list a:hover{text-decoration:underline;}' +
+      '.cc-msg p{margin:3px 0;}' +
+      '.cc-msg ul{margin:5px 0 5px 16px;padding:0;}' +
+      '.cc-msg li{margin:2px 0;}' +
+      '.cc-msg .cc-md-table-wrap{margin:8px 0;overflow-x:auto;}' +
+      '.cc-msg .cc-md-table{min-width:100%;border:1px solid #E5E7EB;border-collapse:separate;border-spacing:0;border-radius:10px;overflow:hidden;font-size:12px;background:#fff;}' +
+      '.cc-msg .cc-md-table th{background:#F9FAFB;text-align:left;padding:7px 9px;border-bottom:1px solid #E5E7EB;font-weight:600;white-space:nowrap;}' +
+      '.cc-msg .cc-md-table td{padding:7px 9px;border-bottom:1px solid #F1F5F9;vertical-align:top;}' +
+      '.cc-msg .cc-md-table tbody tr:last-child td{border-bottom:none;}' +
+      '.cc-msg .cc-md-link{color:#2563EB;text-decoration:none;}' +
+      '.cc-msg .cc-md-link:hover{text-decoration:underline;}' +
+      '.cc-msg .cc-plain{white-space:pre-wrap;}' +
+      '.cc-msg.typing{display:flex;align-items:center;gap:4px;min-height:20px;}' +
+      '.cc-dot{width:6px;height:6px;border-radius:999px;background:#9CA3AF;animation:cc-bounce 1s infinite ease-in-out;}' +
+      '.cc-dot.d2{animation-delay:.15s;}' +
+      '.cc-dot.d3{animation-delay:.3s;}' +
+      '@keyframes cc-bounce{0%,80%,100%{transform:scale(.75);opacity:.45;}40%{transform:scale(1);opacity:1;}}' +
       '.cc-input-wrap{border-top:1px solid #E5E7EB;padding:10px;background:#fff;display:flex;gap:8px;}' +
-      '.cc-input{flex:1;border:1px solid #D1D5DB;border-radius:10px;padding:9px 11px;font-size:13px;outline:none;}' +
+      '.cc-input{flex:1;border:1px solid #D1D5DB;border-radius:10px;padding:9px 11px;font-size:13px;outline:none;font-family:inherit;}' +
       '.cc-input:focus{border-color:var(--cc-theme);box-shadow:0 0 0 3px rgba(0,0,0,.05);}' +
-      '.cc-send{appearance:none;border:none;border-radius:10px;background:var(--cc-theme);color:#fff;padding:0 14px;font-weight:600;cursor:pointer;}' +
+      '.cc-send{appearance:none;border:none;border-radius:999px;background:#111827;color:#fff;width:34px;height:34px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;padding:0;font-size:16px;line-height:1;font-family:inherit;}' +
       '.cc-send:disabled{opacity:.55;cursor:not-allowed;}' +
-      '.cc-launcher{width:62px;height:62px;border-radius:999px;border:none;background:var(--cc-theme);color:#fff;font-size:24px;display:flex;align-items:center;justify-content:center;box-shadow:0 10px 28px rgba(0,0,0,.26);cursor:pointer;overflow:hidden;}' +
-      '.cc-launcher img{width:100%;height:100%;object-fit:cover;}' +
-      '.cc-name{margin-top:7px;font-size:12px;font-weight:700;color:#000;background:#fff;border:1px solid #E5E7EB;border-radius:999px;padding:4px 9px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}' +
-      '.cc-typing{color:#6B7280;font-size:12px;padding:4px 0 0 2px;}' +
-      '@media (max-width: 520px){.cc-container{right:12px;bottom:12px;}.cc-panel{height:68vh;}}' +
+      '.cc-launcher{width:62px;height:62px;border-radius:999px;border:none;background:var(--cc-theme);color:#fff;font-size:24px;display:flex;align-items:center;justify-content:center;box-shadow:0 10px 28px rgba(0,0,0,.26);cursor:pointer;overflow:hidden;padding:0;}' +
+      '.cc-launcher.has-custom-icon{background:transparent;box-shadow:none;}' +
+      '.cc-launcher img{width:100%;height:100%;object-fit:cover;display:block;border-radius:999px;box-shadow:0 10px 28px rgba(0,0,0,.22);}' +
+      '.cc-name{margin:0 0 6px 0;font-size:10px;font-weight:600;color:#111827;background:transparent;border:none;padding:0;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.2;}' +
+      '@media (max-width: 520px){.cc-container{right:12px;bottom:12px;}.cc-panel{height:68vh;bottom:80px;max-width:calc(100vw - 16px);}}' +
       '</style>' +
       '<div class="cc-container" role="dialog" aria-label="Chatbot widget">' +
       '  <div class="cc-panel" id="cc-panel">' +
@@ -241,11 +303,11 @@ const embedWidgetScript = `(function () {
       '    <div class="cc-messages" id="cc-messages"></div>' +
       '    <div class="cc-input-wrap">' +
       '      <input id="cc-input" class="cc-input" type="text" placeholder="Ask a question..." />' +
-      '      <button id="cc-send" class="cc-send" type="button">Send</button>' +
+      '      <button id="cc-send" class="cc-send" type="button" aria-label="Send message">↑</button>' +
       '    </div>' +
       '  </div>' +
+      '  <div id="cc-name" class="cc-name">Ask Chatbot</div>' +
       '  <button id="cc-launcher" class="cc-launcher" type="button" aria-label="Open chat">💬</button>' +
-      '  <div id="cc-name" class="cc-name">Chatbot</div>' +
       '</div>';
 
     var container = shadow.querySelector('.cc-container');
@@ -261,19 +323,26 @@ const embedWidgetScript = `(function () {
     container.style.setProperty('--cc-theme', normalizeColor(config.theme_color, '#DC2626'));
     container.style.setProperty('--cc-user-text', normalizeColor(config.user_font_color, '#FFFFFF'));
     container.style.setProperty('--cc-bot-text', normalizeColor(config.bot_font_color, '#111827'));
-    container.style.setProperty('--cc-font', (config.font_family || 'Roboto, system-ui, sans-serif'));
+    loadGoogleFont(config.font_family);
+    container.style.setProperty('--cc-font', buildFontStack(config.font_family));
 
     var safeName = String(config.chatbot_name || 'Chatbot').trim() || 'Chatbot';
     title.textContent = safeName;
-    nameTag.textContent = safeName;
+    nameTag.textContent = 'Ask ' + safeName;
 
     if (String(config.position || '').toLowerCase() === 'bottom-left') {
       container.style.left = '18px';
       container.style.right = 'auto';
       container.style.alignItems = 'flex-start';
+      panel.style.left = '0';
+      panel.style.right = 'auto';
+      panel.style.transformOrigin = 'bottom left';
     }
 
-    if (config.icon_url && (config.icon_source === 'uploaded' || config.icon_source === 'predefined')) {
+    var hasCustomBotIcon = !!(config.icon_url && (config.icon_source === 'uploaded' || config.icon_source === 'predefined'));
+
+    if (hasCustomBotIcon) {
+      launcher.classList.add('has-custom-icon');
       launcher.textContent = '';
       var img = document.createElement('img');
       img.src = String(config.icon_url);
@@ -324,6 +393,240 @@ const embedWidgetScript = `(function () {
       messagesBox.scrollTop = messagesBox.scrollHeight;
     }
 
+    function stripInlineLinksFromText(text) {
+      var cleaned = String(text || '')
+        .replace(/\s*\[\s*Source[^\]]*\]/gi, '')
+        .replace(/\(\s*https?:\/\/[^\s)]+\s*\)/gi, '')
+        .replace(/https?:\/\/[^\s)]+/gi, '')
+        .replace(/^\s*Sources?\s*:?\s*$/gim, '')
+        .replace(/^\s*Source\s*\d+\s*:?\s*$/gim, '')
+        .replace(/\bSources?\s*\d*\s*:?\s*/gi, '')
+        .replace(/[ \t]+\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+
+      while (cleaned.indexOf('  ') >= 0) {
+        cleaned = cleaned.replace(/  /g, ' ');
+      }
+
+      return cleaned;
+    }
+
+    function appendInlineNodes(target, line) {
+      var remaining = String(line || '');
+
+      while (remaining.length > 0) {
+        var linkMatch = remaining.match(/\[(.+?)\]\((https?:\/\/[^\s)]+)\)/);
+        var boldMatch = remaining.match(/\*\*(.+?)\*\*/);
+        var italicMatch = remaining.match(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/);
+
+        var firstMatch = null;
+        var matchType = '';
+        var firstIndex = 1e9;
+
+        if (linkMatch && linkMatch.index < firstIndex) {
+          firstMatch = linkMatch;
+          matchType = 'link';
+          firstIndex = linkMatch.index;
+        }
+        if (boldMatch && boldMatch.index < firstIndex) {
+          firstMatch = boldMatch;
+          matchType = 'bold';
+          firstIndex = boldMatch.index;
+        }
+        if (italicMatch && italicMatch.index < firstIndex) {
+          firstMatch = italicMatch;
+          matchType = 'italic';
+          firstIndex = italicMatch.index;
+        }
+
+        if (!firstMatch) {
+          target.appendChild(document.createTextNode(remaining));
+          break;
+        }
+
+        if (firstMatch.index > 0) {
+          target.appendChild(document.createTextNode(remaining.substring(0, firstMatch.index)));
+        }
+
+        if (matchType === 'link') {
+          var a = document.createElement('a');
+          a.className = 'cc-md-link';
+          a.href = firstMatch[2];
+          a.target = '_blank';
+          a.rel = 'noopener noreferrer';
+          a.textContent = firstMatch[1];
+          target.appendChild(a);
+        } else if (matchType === 'bold') {
+          var strong = document.createElement('strong');
+          strong.textContent = firstMatch[1];
+          target.appendChild(strong);
+        } else {
+          var em = document.createElement('em');
+          em.textContent = firstMatch[1];
+          target.appendChild(em);
+        }
+
+        remaining = remaining.substring(firstMatch.index + firstMatch[0].length);
+      }
+    }
+
+    function splitTableCells(line) {
+      return String(line || '')
+        .trim()
+        .replace(/^\|/, '')
+        .replace(/\|$/, '')
+        .split('|')
+        .map(function (cell) { return cell.trim(); });
+    }
+
+    function isTableDivider(line) {
+      return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(String(line || ''));
+    }
+
+    function renderMarkdownToFragment(text) {
+      var value = String(text || '');
+      var lines = value.split('\n');
+      var frag = document.createDocumentFragment();
+      var listItems = [];
+
+      function flushList() {
+        if (listItems.length === 0) {
+          return;
+        }
+        var ul = document.createElement('ul');
+        for (var i = 0; i < listItems.length; i += 1) {
+          ul.appendChild(listItems[i]);
+        }
+        frag.appendChild(ul);
+        listItems = [];
+      }
+
+      for (var idx = 0; idx < lines.length; idx += 1) {
+        var line = lines[idx];
+        var trimmed = line.trim();
+
+        if (idx + 1 < lines.length && line.indexOf('|') >= 0 && isTableDivider(lines[idx + 1])) {
+          flushList();
+
+          var headers = splitTableCells(line).slice(0, 6);
+          var rows = [];
+          idx += 2;
+
+          while (idx < lines.length) {
+            var rowLine = lines[idx];
+            if (rowLine.trim() === '' || rowLine.indexOf('|') < 0) {
+              break;
+            }
+            var cells = splitTableCells(rowLine).slice(0, 6);
+            if (cells.length >= 2 && rows.length < 12) {
+              rows.push(cells);
+            }
+            idx += 1;
+          }
+          idx -= 1;
+
+          if (headers.length >= 2 && rows.length > 0) {
+            var wrap = document.createElement('div');
+            wrap.className = 'cc-md-table-wrap';
+
+            var table = document.createElement('table');
+            table.className = 'cc-md-table';
+
+            var thead = document.createElement('thead');
+            var trh = document.createElement('tr');
+            for (var h = 0; h < headers.length; h += 1) {
+              var th = document.createElement('th');
+              appendInlineNodes(th, headers[h]);
+              trh.appendChild(th);
+            }
+            thead.appendChild(trh);
+            table.appendChild(thead);
+
+            var tbody = document.createElement('tbody');
+            for (var r = 0; r < rows.length; r += 1) {
+              var tr = document.createElement('tr');
+              for (var c = 0; c < headers.length; c += 1) {
+                var td = document.createElement('td');
+                appendInlineNodes(td, rows[r][c] || '');
+                tr.appendChild(td);
+              }
+              tbody.appendChild(tr);
+            }
+            table.appendChild(tbody);
+            wrap.appendChild(table);
+            frag.appendChild(wrap);
+          }
+
+          continue;
+        }
+
+        if (/^[-*•]\s+/.test(trimmed)) {
+          var li = document.createElement('li');
+          appendInlineNodes(li, trimmed.replace(/^[-*•]\s+/, ''));
+          listItems.push(li);
+          continue;
+        }
+
+        if (/^\d+[.)]\s+/.test(trimmed)) {
+          flushList();
+          var pNum = document.createElement('p');
+          appendInlineNodes(pNum, trimmed);
+          frag.appendChild(pNum);
+          continue;
+        }
+
+        flushList();
+
+        if (trimmed === '') {
+          continue;
+        }
+
+        var p = document.createElement('p');
+        appendInlineNodes(p, trimmed);
+        frag.appendChild(p);
+      }
+
+      flushList();
+      return frag;
+    }
+
+    function createUserAvatar() {
+      var avatar = document.createElement('div');
+      avatar.className = 'cc-avatar user';
+      avatar.innerHTML = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" fill="currentColor"></path><path d="M4 19.5c0-3.038 2.962-5.5 8-5.5s8 2.462 8 5.5V21H4v-1.5Z" fill="currentColor"></path></svg>';
+      return avatar;
+    }
+
+    function createBotAvatar() {
+      var avatar = document.createElement('div');
+      avatar.className = 'cc-avatar bot';
+
+      if (hasCustomBotIcon) {
+        var icon = document.createElement('img');
+        icon.src = String(config.icon_url);
+        icon.alt = safeName;
+        avatar.appendChild(icon);
+      } else {
+        var fallback = document.createElement('span');
+        fallback.textContent = '🤖';
+        fallback.style.fontSize = '14px';
+        avatar.appendChild(fallback);
+      }
+
+      return avatar;
+    }
+
+    function updateMessageById(messageId, patch) {
+      for (var i = 0; i < state.messages.length; i += 1) {
+        if (state.messages[i].id === messageId) {
+          state.messages[i] = Object.assign({}, state.messages[i], patch);
+          break;
+        }
+      }
+      renderMessages();
+    }
+
     function renderMessages() {
       messagesBox.innerHTML = '';
       for (var i = 0; i < state.messages.length; i += 1) {
@@ -333,42 +636,29 @@ const embedWidgetScript = `(function () {
 
         var bubble = document.createElement('div');
         bubble.className = 'cc-msg';
-        bubble.textContent = m.text;
-        row.appendChild(bubble);
+        var messageText = m.role === 'bot' ? stripInlineLinksFromText(m.text) : String(m.text || '');
 
-        if (m.role === 'bot' && Array.isArray(m.sources) && m.sources.length > 0) {
-          var sourceWrap = document.createElement('div');
-          sourceWrap.className = 'cc-sources';
+        if (m.role === 'bot' && m.streaming && !messageText.trim()) {
+          bubble.className = 'cc-msg typing';
+          bubble.innerHTML = '<span class="cc-dot"></span><span class="cc-dot d2"></span><span class="cc-dot d3"></span>';
+        } else if (m.role === 'bot') {
+          bubble.appendChild(renderMarkdownToFragment(messageText));
+        } else {
+          var plain = document.createElement('div');
+          plain.className = 'cc-plain';
+          plain.textContent = messageText;
+          bubble.appendChild(plain);
+        }
 
-          var sourceLabel = document.createElement('div');
-          sourceLabel.className = 'cc-sources-label';
-          sourceLabel.textContent = 'Sources:';
-          sourceWrap.appendChild(sourceLabel);
-
-          var sourceList = document.createElement('div');
-          sourceList.className = 'cc-sources-list';
-
-          for (var s = 0; s < m.sources.length; s += 1) {
-            var link = document.createElement('a');
-            link.href = m.sources[s];
-            link.target = '_blank';
-            link.rel = 'noopener noreferrer';
-            link.textContent = 'Source ' + (s + 1);
-            sourceList.appendChild(link);
-          }
-
-          sourceWrap.appendChild(sourceList);
-          bubble.appendChild(sourceWrap);
+        if (m.role === 'user') {
+          row.appendChild(bubble);
+          row.appendChild(createUserAvatar());
+        } else {
+          row.appendChild(createBotAvatar());
+          row.appendChild(bubble);
         }
 
         messagesBox.appendChild(row);
-      }
-
-      if (state.sending) {
-        var typing = document.createElement('div');
-        typing.className = 'cc-typing';
-        typing.textContent = 'Thinking...';
-        messagesBox.appendChild(typing);
       }
 
       scrollToBottom();
@@ -384,7 +674,7 @@ const embedWidgetScript = `(function () {
       renderMessages();
     }
 
-    function sendMessage() {
+    async function sendMessage() {
       if (state.sending) {
         return;
       }
@@ -399,40 +689,146 @@ const embedWidgetScript = `(function () {
       sendBtn.disabled = true;
       pushUser(text);
 
-      fetch(apiBase + '/chat/' + encodeURIComponent(projectId), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          session_id: sessionId,
-          message: text
-        })
-      })
-        .then(function (res) {
-          if (!res.ok) {
-            return res.json().catch(function () { return {}; }).then(function (body) {
-              throw new Error(body.error || 'Chat request failed');
-            });
-          }
-          return res.json();
-        })
-        .then(function (data) {
-          var answer = (data && data.answer ? String(data.answer) : '').trim();
-          if (!answer) {
-            answer = 'I could not generate a response. Please try again.';
-          }
-          pushBot(answer, Array.isArray(data.sources) ? data.sources : []);
-        })
-        .catch(function () {
-          pushBot('Unable to reach the chatbot right now. Please try again in a moment.');
-        })
-        .finally(function () {
-          state.sending = false;
-          sendBtn.disabled = false;
-          input.focus();
-          renderMessages();
+      var streamMessageId = 'cc_bot_' + Math.random().toString(36).slice(2);
+      state.messages.push({ id: streamMessageId, role: 'bot', text: '', streaming: true });
+      renderMessages();
+
+      var streamedText = '';
+      var doneReceived = false;
+
+      try {
+        var res = await fetch(apiBase + '/chat/' + encodeURIComponent(projectId), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'text/event-stream'
+          },
+          body: JSON.stringify({
+            session_id: sessionId,
+            message: text,
+            stream: true
+          })
         });
+
+        var contentType = String(res.headers.get('content-type') || '').toLowerCase();
+
+        if (!contentType.includes('text/event-stream')) {
+          var fallbackData = await res.json().catch(function () { return {}; });
+          if (!res.ok) {
+            throw new Error(fallbackData.error || 'Chat request failed');
+          }
+          var fallbackAnswer = (fallbackData.answer ? String(fallbackData.answer) : '').trim();
+          if (!fallbackAnswer) {
+            fallbackAnswer = 'I could not generate a response. Please try again.';
+          }
+          updateMessageById(streamMessageId, { text: fallbackAnswer, streaming: false });
+          return;
+        }
+
+        if (!res.ok) {
+          var rawError = await res.text().catch(function () { return ''; });
+          throw new Error(rawError || 'Chat request failed');
+        }
+
+        var reader = res.body && res.body.getReader ? res.body.getReader() : null;
+        if (!reader) {
+          throw new Error('Streaming response is unavailable');
+        }
+
+        var decoder = new TextDecoder();
+        var buffer = '';
+
+        function processEventBlock(rawBlock) {
+          var block = String(rawBlock || '').trim();
+          if (!block) {
+            return;
+          }
+
+          var eventName = 'message';
+          var dataLines = [];
+          var lines = block.split('\n');
+
+          for (var li = 0; li < lines.length; li += 1) {
+            var line = lines[li];
+            if (line.indexOf('event:') === 0) {
+              eventName = line.slice(6).trim();
+            } else if (line.indexOf('data:') === 0) {
+              dataLines.push(line.slice(5).replace(/^\s+/, ''));
+            }
+          }
+
+          var dataStr = dataLines.join('\n');
+          var payload = {};
+          if (dataStr) {
+            try {
+              payload = JSON.parse(dataStr);
+            } catch (_err) {
+              payload = {};
+            }
+          }
+
+          if (eventName === 'token') {
+            var chunk = payload.text || '';
+            if (!chunk) {
+              return;
+            }
+            streamedText += chunk;
+            updateMessageById(streamMessageId, { text: streamedText, streaming: true });
+            return;
+          }
+
+          if (eventName === 'done') {
+            doneReceived = true;
+            var finalAnswer = payload.answer || streamedText;
+            if (!String(finalAnswer || '').trim()) {
+              finalAnswer = 'I could not generate a response. Please try again.';
+            }
+            updateMessageById(streamMessageId, { text: String(finalAnswer), streaming: false });
+            return;
+          }
+
+          if (eventName === 'error') {
+            throw new Error(payload.error || 'Streaming failed');
+          }
+        }
+
+        while (true) {
+          var read = await reader.read();
+          if (read.done) {
+            break;
+          }
+
+          buffer += decoder.decode(read.value, { stream: true });
+          var parts = buffer.split('\n\n');
+          buffer = parts.pop() || '';
+
+          for (var pi = 0; pi < parts.length; pi += 1) {
+            processEventBlock(parts[pi]);
+          }
+        }
+
+        buffer += decoder.decode();
+
+        if (buffer.trim()) {
+          processEventBlock(buffer);
+        }
+
+        if (!doneReceived) {
+          updateMessageById(streamMessageId, {
+            text: streamedText || 'I could not generate a response. Please try again.',
+            streaming: false
+          });
+        }
+      } catch (_error) {
+        updateMessageById(streamMessageId, {
+          text: 'Unable to reach the chatbot right now. Please try again in a moment.',
+          streaming: false
+        });
+      } finally {
+        state.sending = false;
+        sendBtn.disabled = false;
+        input.focus();
+      }
     }
   }
 })();`

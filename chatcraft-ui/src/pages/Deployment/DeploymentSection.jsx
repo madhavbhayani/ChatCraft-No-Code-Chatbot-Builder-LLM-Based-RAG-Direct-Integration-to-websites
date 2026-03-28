@@ -1,18 +1,19 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { Rocket, Loader2, Copy, Check, Code2, Hash } from "lucide-react";
 import { toast } from "sonner";
 import { getSession } from "../../utils/auth";
-import { API_BASE, apiUrl } from "../../utils/api";
+import { apiUrl } from "../../utils/api";
 
 const API = apiUrl("/api/v1");
 
 export default function DeploymentSection() {
   const { projectId } = useParams();
+  const navigate = useNavigate();
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [deployState, setDeployState] = useState("draft");
-  const [copied, setCopied] = useState(false);
+  const [copiedKey, setCopiedKey] = useState("");
 
   const token = getSession()?.token || "";
 
@@ -49,15 +50,37 @@ export default function DeploymentSection() {
     ? `<script src="${apiUrl(`/api/v1/embed/script.js?project_id=${projectId}`)}" data-project-id="${projectId}" defer></script>`
     : "";
 
-  const copyScriptTag = async () => {
-    if (!scriptTag) return;
+  const reactInstallSnippet = "npm install chatcraft-bot";
+
+  const reactAppSnippet = `import React from "react";
+import { ChatCraftBot } from "chatcraft-bot/react";
+
+function App() {
+  return (
+    <div style={{ background: "#FFFFFF", minHeight: "100vh" }}>
+      {/* Your website content goes here */}
+
+      <ChatCraftBot
+        projectId="${projectId || "YOUR_PROJECT_ID"}"
+        apiBase="http://localhost:8080/api/v1"
+      />
+    </div>
+  );
+}
+
+export default App;`;
+
+  const copySnippet = async (key, value) => {
+    if (!value) return;
     try {
-      await navigator.clipboard.writeText(scriptTag);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1800);
-      toast.success("Script tag copied");
+      await navigator.clipboard.writeText(value);
+      setCopiedKey(key);
+      setTimeout(() => {
+        setCopiedKey((current) => (current === key ? "" : current));
+      }, 3000);
+      toast.success("Copied to clipboard");
     } catch {
-      toast.error("Failed to copy script tag");
+      toast.error("Failed to copy");
     }
   };
 
@@ -156,56 +179,109 @@ export default function DeploymentSection() {
           </div>
         </section>
 
-        <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-100 bg-gray-50/50">
-            <h3 className="text-sm font-semibold text-charcoal flex items-center gap-2">
-              <Code2 size={15} />
-              Option 1: Script Tag Embed
-            </h3>
-          </div>
-
-          <div className="p-6 space-y-5">
-            <p className="text-sm text-gray-600">
-              Paste this script tag in your website HTML (before <code>&lt;/body&gt;</code>). It auto-initializes the chatbot widget with your deployed settings.
-            </p>
-            {/* <p className="text-xs text-gray-500">
-              Backend host: <span className="font-mono">{API_BASE}</span>
-            </p> */}
-
-            <div className="rounded-xl border border-gray-200 bg-[#0B1020] p-4">
-              <pre className="text-xs leading-relaxed text-[#F8FAFC] whitespace-pre-wrap break-all">
-                {scriptTag || "Project ID required to generate script tag"}
-              </pre>
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
+          <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-100 bg-gray-50/50">
+              <h3 className="text-sm font-semibold text-charcoal flex items-center gap-2">
+                <Code2 size={15} />
+                Option 1: Script Tag Embed
+              </h3>
             </div>
 
-            <button
-              type="button"
-              onClick={copyScriptTag}
-              disabled={!scriptTag || deployState !== "deployed"}
-              className="inline-flex items-center gap-2 bg-charcoal text-white px-4 py-2 rounded-lg hover:bg-black disabled:opacity-60 disabled:cursor-not-allowed transition"
-            >
-              {copied ? <Check size={14} /> : <Copy size={14} />}
-              {copied ? "Copied" : "Copy Script Tag"}
-            </button>
-
-            {deployState !== "deployed" && (
-              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                Mark the bot as deployed before embedding on external websites.
+            <div className="p-6 space-y-5">
+              <p className="text-sm text-gray-600">
+                Paste this script tag in your website HTML (before <code>&lt;/body&gt;</code>). It auto-initializes the chatbot widget with your deployed settings.
               </p>
-            )}
 
-            <div className="text-xs text-gray-500 border border-gray-200 rounded-lg p-3 bg-gray-50">
-              Behavior included automatically:
-              <ul className="list-disc pl-5 mt-1 space-y-1">
-                <li>Bottom-right circular launcher button</li>
-                <li>Chatbot name label below launcher in black</li>
-                <li>Compact chat panel with message input and send button</li>
-                <li>Responsive layout for desktop and mobile</li>
-                <li>Uses your project ID to query your chatbot knowledge base</li>
-              </ul>
+              <div className="rounded-xl border border-gray-200 bg-[#0B1020] p-4">
+                <pre className="text-xs leading-relaxed text-[#F8FAFC] whitespace-pre-wrap break-all">
+                  {scriptTag || "Project ID required to generate script tag"}
+                </pre>
+                <div className="mt-3 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => copySnippet("script-tag", scriptTag)}
+                    disabled={!scriptTag || deployState !== "deployed"}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/20 bg-white/10 text-white hover:bg-white/20 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                    aria-label="Copy script tag"
+                    title="Copy script tag"
+                  >
+                    {copiedKey === "script-tag" ? <Check size={14} className="text-emerald-300 animate-pulse" /> : <Copy size={14} />}
+                  </button>
+                </div>
+              </div>
+
+              {deployState !== "deployed" && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  Mark the bot as deployed before embedding on external websites.
+                </p>
+              )}
             </div>
-          </div>
-        </section>
+          </section>
+
+          <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-100 bg-gray-50/50">
+              <h3 className="text-sm font-semibold text-charcoal flex items-center gap-2">
+                <Code2 size={15} />
+                Option 2: React (npm Package)
+              </h3>
+            </div>
+
+            <div className="p-6 space-y-5">
+              <p className="text-sm text-gray-600">
+                Use the <code>chatcraft-bot</code> package for React and npm-based frameworks.
+              </p>
+
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Install</p>
+                <div className="rounded-xl border border-gray-200 bg-[#0B1020] p-4">
+                  <pre className="text-xs leading-relaxed text-[#F8FAFC] whitespace-pre-wrap break-all">{reactInstallSnippet}</pre>
+                  <div className="mt-3 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => copySnippet("react-install", reactInstallSnippet)}
+                      disabled={deployState !== "deployed"}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/20 bg-white/10 text-white hover:bg-white/20 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                      aria-label="Copy install command"
+                      title="Copy install command"
+                    >
+                      {copiedKey === "react-install" ? <Check size={14} className="text-emerald-300 animate-pulse" /> : <Copy size={14} />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">App.jsx (Ready To Use)</p>
+                <div className="rounded-xl border border-gray-200 bg-[#0B1020] p-4">
+                  <pre className="text-xs leading-relaxed text-[#F8FAFC] whitespace-pre-wrap break-all">{reactAppSnippet}</pre>
+                  <div className="mt-3 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => copySnippet("react-app", reactAppSnippet)}
+                      disabled={deployState !== "deployed"}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/20 bg-white/10 text-white hover:bg-white/20 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                      aria-label="Copy React App snippet"
+                      title="Copy React App snippet"
+                    >
+                      {copiedKey === "react-app" ? <Check size={14} className="text-emerald-300 animate-pulse" /> : <Copy size={14} />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div className="pt-2 flex justify-center">
+          <button
+            type="button"
+            onClick={() => navigate("/docs")}
+            className="inline-flex items-center gap-2 bg-charcoal text-white px-5 py-2 rounded-lg hover:bg-black transition"
+          >
+            View Docs
+          </button>
+        </div>
       </div>
     </div>
   );

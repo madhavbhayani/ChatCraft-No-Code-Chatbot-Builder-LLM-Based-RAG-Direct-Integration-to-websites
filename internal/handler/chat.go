@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"net"
 	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/madhavbhayani/ChatCraft-No-Code-Chatbot-Builder-LLM-Based-RAG-Direct-Integration-to-websites/config"
 	"github.com/madhavbhayani/ChatCraft-No-Code-Chatbot-Builder-LLM-Based-RAG-Direct-Integration-to-websites/internal/database"
@@ -24,6 +27,90 @@ import (
 type ChatHandler struct {
 	DB *database.DB
 }
+
+const (
+	chatSessionRequestLimit  = 25
+	chatSessionWindow        = 5 * time.Minute
+	chatSessionCleanupWindow = 10 * time.Minute
+)
+
+type chatSessionWindowState struct {
+	WindowStart time.Time
+	LastSeen    time.Time
+	Count       int
+}
+
+type chatSessionRateLimiter struct {
+	mu          sync.Mutex
+	limit       int
+	window      time.Duration
+	cleanupTTL  time.Duration
+	lastCleanup time.Time
+	sessions    map[string]chatSessionWindowState
+}
+
+func newChatSessionRateLimiter(limit int, window, cleanupTTL time.Duration) *chatSessionRateLimiter {
+	return &chatSessionRateLimiter{
+		limit:      limit,
+		window:     window,
+		cleanupTTL: cleanupTTL,
+		sessions:   make(map[string]chatSessionWindowState),
+	}
+}
+
+func (rl *chatSessionRateLimiter) allow(sessionKey string, now time.Time) (allowed bool, remaining int, retryAfter time.Duration) {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	if sessionKey == "" {
+		sessionKey = "anonymous"
+	}
+
+	if rl.lastCleanup.IsZero() || now.Sub(rl.lastCleanup) >= time.Minute {
+		for key, state := range rl.sessions {
+			if now.Sub(state.LastSeen) > rl.cleanupTTL {
+				delete(rl.sessions, key)
+			}
+		}
+		rl.lastCleanup = now
+	}
+
+	state, ok := rl.sessions[sessionKey]
+	if !ok || now.Sub(state.WindowStart) >= rl.window {
+		state = chatSessionWindowState{
+			WindowStart: now,
+			LastSeen:    now,
+			Count:       1,
+		}
+		rl.sessions[sessionKey] = state
+		return true, rl.limit - 1, rl.window
+	}
+
+	state.LastSeen = now
+	if state.Count >= rl.limit {
+		rl.sessions[sessionKey] = state
+		retryAfter = rl.window - now.Sub(state.WindowStart)
+		if retryAfter < 0 {
+			retryAfter = 0
+		}
+		return false, 0, retryAfter
+	}
+
+	state.Count++
+	rl.sessions[sessionKey] = state
+	remaining = rl.limit - state.Count
+	if remaining < 0 {
+		remaining = 0
+	}
+	retryAfter = rl.window - now.Sub(state.WindowStart)
+	if retryAfter < 0 {
+		retryAfter = 0
+	}
+
+	return true, remaining, retryAfter
+}
+
+var chatLimiter = newChatSessionRateLimiter(chatSessionRequestLimit, chatSessionWindow, chatSessionCleanupWindow)
 
 // searchResult holds a single RAG search result with metadata.
 type searchResult struct {
@@ -78,7 +165,19 @@ func (h *ChatHandler) Chat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.SessionID == "" {
-		req.SessionID = uuid.New().String()
+		req.SessionID = fallbackSessionIDFromRequest(r)
+	}
+
+	now := time.Now()
+	rateKey := botToken + "|" + req.SessionID
+	allowed, remaining, retryAfter := chatLimiter.allow(rateKey, now)
+	w.Header().Set("X-RateLimit-Limit", strconv.Itoa(chatSessionRequestLimit))
+	w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(remaining))
+	w.Header().Set("X-RateLimit-Window-Seconds", strconv.Itoa(int(chatSessionWindow.Seconds())))
+	if !allowed {
+		w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(retryAfter.Seconds()))))
+		writeError(w, http.StatusTooManyRequests, "Rate limit exceeded: max 25 messages per session every 5 minutes")
+		return
 	}
 
 	ctx := r.Context()
@@ -691,6 +790,37 @@ func writeSSEEvent(w http.ResponseWriter, flusher http.Flusher, event string, pa
 	}
 	flusher.Flush()
 	return nil
+}
+
+func fallbackSessionIDFromRequest(r *http.Request) string {
+	if raw := strings.TrimSpace(r.Header.Get("X-Session-ID")); raw != "" {
+		return raw
+	}
+
+	if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
+		parts := strings.Split(xff, ",")
+		if len(parts) > 0 {
+			ip := strings.TrimSpace(parts[0])
+			if ip != "" {
+				return "anon:" + ip
+			}
+		}
+	}
+
+	if cfIP := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); cfIP != "" {
+		return "anon:" + cfIP
+	}
+
+	remote := strings.TrimSpace(r.RemoteAddr)
+	if remote != "" {
+		host, _, err := net.SplitHostPort(remote)
+		if err == nil && strings.TrimSpace(host) != "" {
+			return "anon:" + strings.TrimSpace(host)
+		}
+		return "anon:" + remote
+	}
+
+	return uuid.New().String()
 }
 
 // storeConversation saves a chat exchange to the conversations table.
