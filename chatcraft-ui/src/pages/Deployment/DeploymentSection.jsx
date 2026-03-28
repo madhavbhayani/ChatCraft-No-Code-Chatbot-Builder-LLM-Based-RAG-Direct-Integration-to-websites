@@ -62,7 +62,7 @@ function App() {
 
       <ChatCraftBot
         projectId="${projectId || "YOUR_PROJECT_ID"}"
-        apiBase={import.meta.env.VITE_BACKEND_URL + "/api/v1"}
+        apiBase=${import.meta.env.VITE_BACKEND_URL + "/api/v1"}
       />
     </div>
   );
