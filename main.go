@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"io"
 	"log"
 	"net/http"
 	"runtime"
@@ -19,6 +20,9 @@ const (
 	memoryLimitB   = memoryLimitMB * 1024 * 1024
 	idleTrimAtMB   = 380 // keep headroom under hard limit
 	idleTrimTicker = 20 * time.Second
+
+	selfHealthPingInterval = 10 * time.Minute
+	selfHealthPingTimeout  = 8 * time.Second
 )
 
 func main() {
@@ -49,15 +53,45 @@ func main() {
 
 	// Build router
 	router := server.NewRouter(db)
+	addr := ":" + cfg.Port
+	selfHealthURL := "http://127.0.0.1" + addr + "/api/v1/health"
 
 	// Background memory manager for idle cleanup.
 	go startMemoryManager(db)
+	go startSelfHealthPing(selfHealthURL)
 
 	// Start server
-	addr := ":" + cfg.Port
 	log.Printf("ChatCraft API server starting on %s", addr)
 	if err := http.ListenAndServe(addr, router); err != nil {
 		log.Fatalf("Server failed: %v", err)
+	}
+}
+
+func startSelfHealthPing(url string) {
+	client := &http.Client{Timeout: selfHealthPingTimeout}
+	ticker := time.NewTicker(selfHealthPingInterval)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		req, err := http.NewRequest(http.MethodGet, url, nil)
+		if err != nil {
+			log.Printf("[keepalive] failed to create health ping request: %v", err)
+			continue
+		}
+		req.Header.Set("User-Agent", "chatcraft-keepalive/1.0")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			log.Printf("[keepalive] health ping failed: %v", err)
+			continue
+		}
+
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+
+		if resp.StatusCode >= 300 {
+			log.Printf("[keepalive] health ping returned status %d", resp.StatusCode)
+		}
 	}
 }
 

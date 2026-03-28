@@ -22,9 +22,12 @@ func Connect(databaseURL string) (*DB, error) {
 
 	// Connection pool settings — optimized for concurrent jobs
 	config.MaxConns = 20 // Supports more concurrent embedding/crawl jobs
-	config.MinConns = 5  // Maintain minimum idle connections
+	// Allow Neon compute to autosuspend when there is no workload.
+	// Keeping MinConns at 0 avoids permanently pinned idle connections.
+	config.MinConns = 0
 	config.MaxConnLifetime = 30 * time.Minute
-	config.MaxConnIdleTime = 5 * time.Minute
+	// Release idle connections before Neon suspend window (typically ~5 min).
+	config.MaxConnIdleTime = 4 * time.Minute
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
