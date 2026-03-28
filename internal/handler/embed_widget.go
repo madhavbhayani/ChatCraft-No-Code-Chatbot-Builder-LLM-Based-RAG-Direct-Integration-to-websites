@@ -19,14 +19,16 @@ func (h *BotBuilderHandler) GetPublicEmbedConfig(w http.ResponseWriter, r *http.
 	}
 
 	var (
-		projectName string
-		chatbotName string
-		themeColor  string
-		fontFamily  string
-		iconURL     string
-		iconSource  string
-		position    string
-		isDeployed  bool
+		projectName   string
+		chatbotName   string
+		themeColor    string
+		userFontColor string
+		botFontColor  string
+		fontFamily    string
+		iconURL       string
+		iconSource    string
+		position      string
+		isDeployed    bool
 	)
 
 	err := h.DB.Pool.QueryRow(r.Context(),
@@ -34,6 +36,8 @@ func (h *BotBuilderHandler) GetPublicEmbedConfig(w http.ResponseWriter, r *http.
 		    COALESCE(p.name, ''),
 		    COALESCE(p.bot_name, ''),
 		    COALESCE(c.theme_color, '#DC2626'),
+        COALESCE(c.user_font_color, '#FFFFFF'),
+        COALESCE(c.bot_font_color, '#111827'),
 		    COALESCE(c.font_family, 'Roboto'),
 		    COALESCE(c.icon_url, ''),
 		    COALESCE(c.icon_source, 'none'),
@@ -50,7 +54,7 @@ func (h *BotBuilderHandler) GetPublicEmbedConfig(w http.ResponseWriter, r *http.
      ) b ON true
 		 WHERE p.id = $1`,
 		projectID,
-	).Scan(&projectName, &chatbotName, &themeColor, &fontFamily, &iconURL, &iconSource, &position, &isDeployed)
+	).Scan(&projectName, &chatbotName, &themeColor, &userFontColor, &botFontColor, &fontFamily, &iconURL, &iconSource, &position, &isDeployed)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			writeError(w, http.StatusNotFound, "Project not found")
@@ -75,6 +79,12 @@ func (h *BotBuilderHandler) GetPublicEmbedConfig(w http.ResponseWriter, r *http.
 	if strings.TrimSpace(themeColor) == "" {
 		themeColor = "#DC2626"
 	}
+	if strings.TrimSpace(userFontColor) == "" {
+		userFontColor = "#FFFFFF"
+	}
+	if strings.TrimSpace(botFontColor) == "" {
+		botFontColor = "#111827"
+	}
 	if strings.TrimSpace(fontFamily) == "" {
 		fontFamily = "Roboto"
 	}
@@ -85,15 +95,17 @@ func (h *BotBuilderHandler) GetPublicEmbedConfig(w http.ResponseWriter, r *http.
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"project_id":    projectID,
-		"project_name":  projectName,
-		"chatbot_name":  chatbotName,
-		"theme_color":   themeColor,
-		"font_family":   fontFamily,
-		"icon_url":      iconURL,
-		"icon_source":   iconSource,
-		"position":      position,
-		"chat_endpoint": "/api/v1/chat/" + projectID,
+		"project_id":      projectID,
+		"project_name":    projectName,
+		"chatbot_name":    chatbotName,
+		"theme_color":     themeColor,
+		"user_font_color": userFontColor,
+		"bot_font_color":  botFontColor,
+		"font_family":     fontFamily,
+		"icon_url":        iconURL,
+		"icon_source":     iconSource,
+		"position":        position,
+		"chat_endpoint":   "/api/v1/chat/" + projectID,
 	})
 }
 
@@ -153,6 +165,8 @@ const embedWidgetScript = `(function () {
   var config = {
     chatbot_name: 'Chatbot',
     theme_color: '#DC2626',
+    user_font_color: '#FFFFFF',
+    bot_font_color: '#111827',
     font_family: 'Roboto, system-ui, sans-serif',
     icon_url: '',
     icon_source: 'none',
@@ -200,8 +214,8 @@ const embedWidgetScript = `(function () {
       '.cc-msg-row{display:flex;margin:8px 0;}' +
       '.cc-msg-row.user{justify-content:flex-end;}' +
       '.cc-msg{max-width:85%;padding:9px 11px;border-radius:12px;font-size:13px;line-height:1.45;white-space:pre-wrap;word-break:break-word;}' +
-      '.cc-msg-row.user .cc-msg{background:#111827;color:#fff;border-bottom-right-radius:4px;}' +
-      '.cc-msg-row.bot .cc-msg{background:#fff;color:#111827;border:1px solid #E5E7EB;border-bottom-left-radius:4px;}' +
+      '.cc-msg-row.user .cc-msg{background:#111827;color:var(--cc-user-text);border-bottom-right-radius:4px;}' +
+      '.cc-msg-row.bot .cc-msg{background:#fff;color:var(--cc-bot-text);border:1px solid #E5E7EB;border-bottom-left-radius:4px;}' +
       '.cc-sources{margin-top:7px;padding-top:7px;border-top:1px solid #F1F5F9;font-size:11px;}' +
       '.cc-sources-label{color:#6B7280;margin-bottom:4px;}' +
       '.cc-sources-list{display:flex;gap:8px;flex-wrap:wrap;}' +
@@ -244,7 +258,9 @@ const embedWidgetScript = `(function () {
     var input = shadow.getElementById('cc-input');
     var sendBtn = shadow.getElementById('cc-send');
 
-    container.style.setProperty('--cc-theme', normalizeColor(config.theme_color));
+    container.style.setProperty('--cc-theme', normalizeColor(config.theme_color, '#DC2626'));
+    container.style.setProperty('--cc-user-text', normalizeColor(config.user_font_color, '#FFFFFF'));
+    container.style.setProperty('--cc-bot-text', normalizeColor(config.bot_font_color, '#111827'));
     container.style.setProperty('--cc-font', (config.font_family || 'Roboto, system-ui, sans-serif'));
 
     var safeName = String(config.chatbot_name || 'Chatbot').trim() || 'Chatbot';
@@ -296,10 +312,10 @@ const embedWidgetScript = `(function () {
       }
     });
 
-    function normalizeColor(color) {
+    function normalizeColor(color, fallback) {
       var c = String(color || '').trim();
       if (!c) {
-        return '#DC2626';
+        return fallback || '#DC2626';
       }
       return c;
     }

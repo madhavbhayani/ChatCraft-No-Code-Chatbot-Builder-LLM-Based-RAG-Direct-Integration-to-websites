@@ -809,7 +809,7 @@ export default function ConsolePage() {
       </aside>
 
       {/* ─── Main Content ─── */}
-      <main className="flex-1 flex flex-col min-h-screen overflow-hidden">
+      <main className="flex-1 flex flex-col min-h-screen overflow-x-clip">
         <Routes>
           <Route
             path="knowledge-base"

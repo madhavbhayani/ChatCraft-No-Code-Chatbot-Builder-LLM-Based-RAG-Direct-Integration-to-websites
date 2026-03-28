@@ -246,6 +246,8 @@ func (h *BotBuilderHandler) SaveBotCustomization(w http.ResponseWriter, r *http.
 	}
 
 	themeColor := strings.TrimSpace(r.FormValue("theme_color"))
+	userFontColor := strings.TrimSpace(r.FormValue("user_font_color"))
+	botFontColor := strings.TrimSpace(r.FormValue("bot_font_color"))
 	fontFamily := strings.TrimSpace(r.FormValue("font_family"))
 	iconSource := strings.TrimSpace(r.FormValue("icon_source"))
 	selectedIconURL := strings.TrimSpace(r.FormValue("selected_icon_url"))
@@ -262,6 +264,20 @@ func (h *BotBuilderHandler) SaveBotCustomization(w http.ResponseWriter, r *http.
 
 	if themeColor == "" || !validateThemeColor(themeColor) {
 		writeError(w, http.StatusBadRequest, "Invalid theme color")
+		return
+	}
+	if userFontColor == "" {
+		userFontColor = "#FFFFFF"
+	}
+	if botFontColor == "" {
+		botFontColor = "#111827"
+	}
+	if !validateThemeColor(userFontColor) {
+		writeError(w, http.StatusBadRequest, "Invalid user font color")
+		return
+	}
+	if !validateThemeColor(botFontColor) {
+		writeError(w, http.StatusBadRequest, "Invalid chatbot font color")
 		return
 	}
 	if fontFamily == "" {
@@ -352,15 +368,20 @@ func (h *BotBuilderHandler) SaveBotCustomization(w http.ResponseWriter, r *http.
 	}
 
 	_, execErr := h.DB.Pool.Exec(r.Context(),
-		`INSERT INTO bot_customizations (project_id, icon_url, theme_color, font_family, icon_source, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, NOW())
+		`INSERT INTO bot_customizations (
+			project_id, icon_url, theme_color, font_family, icon_source,
+			user_font_color, bot_font_color, updated_at
+		 )
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
 		 ON CONFLICT (project_id)
 		 DO UPDATE SET icon_url = EXCLUDED.icon_url,
 		               theme_color = EXCLUDED.theme_color,
 		               font_family = EXCLUDED.font_family,
 		               icon_source = EXCLUDED.icon_source,
+		               user_font_color = EXCLUDED.user_font_color,
+		               bot_font_color = EXCLUDED.bot_font_color,
 		               updated_at = NOW()`,
-		projectID, iconURL, themeColor, fontFamily, iconSource,
+		projectID, iconURL, themeColor, fontFamily, iconSource, userFontColor, botFontColor,
 	)
 	if execErr != nil {
 		log.Printf("[customization] DB upsert failed: %v", execErr)
@@ -383,6 +404,8 @@ func (h *BotBuilderHandler) SaveBotCustomization(w http.ResponseWriter, r *http.
 		"project_id":      projectID,
 		"icon_url":        iconURL,
 		"theme_color":     themeColor,
+		"user_font_color": userFontColor,
+		"bot_font_color":  botFontColor,
 		"font_family":     fontFamily,
 		"icon_source":     iconSource,
 		"chatbot_name":    chatbotName,
@@ -405,6 +428,7 @@ func (h *BotBuilderHandler) GetBotCustomization(w http.ResponseWriter, r *http.R
 	}
 
 	var iconURL, themeColor, fontFamily, iconSource, chatbotName string
+	var userFontColor, botFontColor string
 	if err := h.DB.Pool.QueryRow(r.Context(),
 		`SELECT COALESCE(bot_name, '')
 		 FROM projects
@@ -417,11 +441,11 @@ func (h *BotBuilderHandler) GetBotCustomization(w http.ResponseWriter, r *http.R
 	}
 
 	err := h.DB.Pool.QueryRow(r.Context(),
-		`SELECT icon_url, theme_color, font_family, icon_source
+		`SELECT icon_url, theme_color, font_family, icon_source, user_font_color, bot_font_color
 		 FROM bot_customizations
 		 WHERE project_id = $1`,
 		projectID,
-	).Scan(&iconURL, &themeColor, &fontFamily, &iconSource)
+	).Scan(&iconURL, &themeColor, &fontFamily, &iconSource, &userFontColor, &botFontColor)
 	if err != nil {
 		if err != pgx.ErrNoRows {
 			log.Printf("[customization] failed to fetch settings: %v", err)
@@ -431,23 +455,27 @@ func (h *BotBuilderHandler) GetBotCustomization(w http.ResponseWriter, r *http.R
 		// Return defaults when customization has not been saved yet.
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"project_id":   projectID,
-			"icon_url":     "",
-			"theme_color":  "#DC2626",
-			"font_family":  "Roboto",
-			"icon_source":  "none",
-			"chatbot_name": chatbotName,
+			"project_id":      projectID,
+			"icon_url":        "",
+			"theme_color":     "#DC2626",
+			"user_font_color": "#FFFFFF",
+			"bot_font_color":  "#111827",
+			"font_family":     "Roboto",
+			"icon_source":     "none",
+			"chatbot_name":    chatbotName,
 		})
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"project_id":   projectID,
-		"icon_url":     iconURL,
-		"theme_color":  themeColor,
-		"font_family":  fontFamily,
-		"icon_source":  iconSource,
-		"chatbot_name": chatbotName,
+		"project_id":      projectID,
+		"icon_url":        iconURL,
+		"theme_color":     themeColor,
+		"user_font_color": userFontColor,
+		"bot_font_color":  botFontColor,
+		"font_family":     fontFamily,
+		"icon_source":     iconSource,
+		"chatbot_name":    chatbotName,
 	})
 }

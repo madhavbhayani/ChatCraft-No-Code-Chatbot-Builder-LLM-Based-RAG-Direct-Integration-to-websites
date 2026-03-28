@@ -6,6 +6,8 @@ import { getSession } from "../../utils/auth";
 
 const API = "/api/v1";
 const DEFAULT_THEME_COLOR = "#DC2626";
+const DEFAULT_USER_FONT_COLOR = "#FFFFFF";
+const DEFAULT_BOT_FONT_COLOR = "#111827";
 
 const GOOGLE_FONTS = [
   "Alegreya", "Almarai", "Amiri", "Archivo", "Arvo", "Asap", "Asap Condensed", "Assistant",
@@ -42,24 +44,20 @@ function loadGoogleFont(fontName) {
   loadedFonts.add(fontName);
 }
 
-function hexToRgbString(hex) {
-  const normalized = hex.replace("#", "").trim();
-  if (!/^[0-9A-Fa-f]{6}$/.test(normalized)) return "";
-  const r = parseInt(normalized.slice(0, 2), 16);
-  const g = parseInt(normalized.slice(2, 4), 16);
-  const b = parseInt(normalized.slice(4, 6), 16);
-  return `${r}, ${g}, ${b}`;
-}
+function normalizeHexColor(value, fallback) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return fallback;
+  if (/^#([0-9A-Fa-f]{6})$/.test(trimmed)) return trimmed.toUpperCase();
 
-function rgbStringToHex(value) {
-  const match = value.match(/^\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*$/);
-  if (!match) return "";
+  const match = trimmed.match(/^\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*$/);
+  if (!match) return fallback;
   const r = Number(match[1]);
   const g = Number(match[2]);
   const b = Number(match[3]);
-  if ([r, g, b].some((v) => Number.isNaN(v) || v < 0 || v > 255)) return "";
+  if ([r, g, b].some((v) => Number.isNaN(v) || v < 0 || v > 255)) return fallback;
   return `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("").toUpperCase()}`;
 }
+
 
 function IconGallery({
   selectedIcon,
@@ -248,10 +246,8 @@ export default function CustomizationSection({ projectName = "" }) {
   const [uploadingError, setUploadingError] = useState("");
 
   const [themeColor, setThemeColor] = useState(DEFAULT_THEME_COLOR);
-  const [hexValue, setHexValue] = useState(DEFAULT_THEME_COLOR);
-  const [rgbValue, setRgbValue] = useState(hexToRgbString(DEFAULT_THEME_COLOR));
-  const [hexError, setHexError] = useState("");
-  const [rgbError, setRgbError] = useState("");
+  const [userFontColor, setUserFontColor] = useState(DEFAULT_USER_FONT_COLOR);
+  const [botFontColor, setBotFontColor] = useState(DEFAULT_BOT_FONT_COLOR);
   const [fontFamily, setFontFamily] = useState("Roboto");
   const [chatbotName, setChatbotName] = useState("");
 
@@ -287,12 +283,9 @@ export default function CustomizationSection({ projectName = "" }) {
           throw new Error("Failed to load customization");
         }
         const data = await res.json();
-        if (data.theme_color) {
-          setThemeColor(data.theme_color);
-          setHexValue(data.theme_color);
-          const rgb = hexToRgbString(data.theme_color);
-          if (rgb) setRgbValue(rgb);
-        }
+        setThemeColor(normalizeHexColor(data.theme_color, DEFAULT_THEME_COLOR));
+        setUserFontColor(normalizeHexColor(data.user_font_color, DEFAULT_USER_FONT_COLOR));
+        setBotFontColor(normalizeHexColor(data.bot_font_color, DEFAULT_BOT_FONT_COLOR));
         if (data.font_family) {
           setFontFamily(data.font_family);
         }
@@ -314,40 +307,6 @@ export default function CustomizationSection({ projectName = "" }) {
   const handleColorPicker = (hex) => {
     const upperHex = hex.toUpperCase();
     setThemeColor(upperHex);
-    setHexValue(upperHex);
-    setRgbValue(hexToRgbString(upperHex));
-    setHexError("");
-    setRgbError("");
-  };
-
-  const handleHexChange = (value) => {
-    setHexValue(value.toUpperCase());
-    setHexError("");
-    if (!value.trim()) return;
-
-    const normalized = value.trim().toUpperCase();
-    if (!/^#([0-9A-F]{6})$/.test(normalized)) {
-      setHexError("Enter HEX like #DC2626");
-      return;
-    }
-
-    setThemeColor(normalized);
-    setRgbValue(hexToRgbString(normalized));
-  };
-
-  const handleRgbChange = (value) => {
-    setRgbValue(value);
-    setRgbError("");
-    if (!value.trim()) return;
-
-    const hex = rgbStringToHex(value);
-    if (!hex) {
-      setRgbError("Use RGB format: R, G, B (0-255)");
-      return;
-    }
-
-    setThemeColor(hex);
-    setHexValue(hex);
   };
 
   const handleSave = async () => {
@@ -359,7 +318,7 @@ export default function CustomizationSection({ projectName = "" }) {
       toast.error("Session expired. Please log in again.");
       return;
     }
-    if (hexError || rgbError || uploadingError) {
+    if (uploadingError) {
       toast.error("Fix validation errors before saving");
       return;
     }
@@ -372,6 +331,8 @@ export default function CustomizationSection({ projectName = "" }) {
     try {
       const formData = new FormData();
       formData.append("theme_color", themeColor);
+      formData.append("user_font_color", userFontColor);
+      formData.append("bot_font_color", botFontColor);
       formData.append("font_family", fontFamily);
       formData.append("chatbot_name", chatbotName.trim());
       formData.append("icon_source", selectedIcon?.source || "none");
@@ -450,7 +411,7 @@ export default function CustomizationSection({ projectName = "" }) {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto p-6">
+    <div className="flex-1 p-6">
       <div className="space-y-6">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
@@ -468,7 +429,7 @@ export default function CustomizationSection({ projectName = "" }) {
           </button>
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 xl:items-start">
           <div className="xl:col-span-2 space-y-6">
             <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
               <div className="px-6 py-4 border-b border-gray-100 bg-gray-50/50">
@@ -527,31 +488,44 @@ export default function CustomizationSection({ projectName = "" }) {
                     aria-label="Pick color"
                   />
                   <span className="text-sm text-gray-600">Select your theme color</span>
+                  <span className="text-xs font-mono text-gray-500">{themeColor}</span>
+                </div>
+              </div>
+            </section>
+
+            <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+              <div className="px-6 py-4 border-b border-gray-100 bg-gray-50/50">
+                <h3 className="text-sm font-semibold text-charcoal flex items-center gap-2">
+                  <Type size={15} />
+                  Font Colors
+                </h3>
+              </div>
+              <div className="p-6 space-y-4">
+                <div className="flex items-center gap-3">
+                  <input
+                    type="color"
+                    value={userFontColor}
+                    onChange={(event) => setUserFontColor(event.target.value.toUpperCase())}
+                    className="h-10 w-14 rounded-md border border-gray-200 cursor-pointer bg-white"
+                    aria-label="Pick user text color"
+                  />
+                  <div className="space-y-0.5">
+                    <p className="text-sm text-gray-700 font-medium">User message text</p>
+                    <p className="text-xs font-mono text-gray-500">{userFontColor}</p>
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs font-semibold text-gray-600 mb-1 block">HEX</label>
-                    <input
-                      type="text"
-                      value={hexValue}
-                      onChange={(event) => handleHexChange(event.target.value)}
-                      placeholder="#DC2626"
-                      className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-crimson"
-                    />
-                    {hexError ? <p className="text-xs text-crimson mt-1">{hexError}</p> : null}
-                  </div>
-
-                  <div>
-                    <label className="text-xs font-semibold text-gray-600 mb-1 block">RGB</label>
-                    <input
-                      type="text"
-                      value={rgbValue}
-                      onChange={(event) => handleRgbChange(event.target.value)}
-                      placeholder="220, 38, 38"
-                      className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-crimson"
-                    />
-                    {rgbError ? <p className="text-xs text-crimson mt-1">{rgbError}</p> : null}
+                <div className="flex items-center gap-3">
+                  <input
+                    type="color"
+                    value={botFontColor}
+                    onChange={(event) => setBotFontColor(event.target.value.toUpperCase())}
+                    className="h-10 w-14 rounded-md border border-gray-200 cursor-pointer bg-white"
+                    aria-label="Pick chatbot text color"
+                  />
+                  <div className="space-y-0.5">
+                    <p className="text-sm text-gray-700 font-medium">Chatbot message text</p>
+                    <p className="text-xs font-mono text-gray-500">{botFontColor}</p>
                   </div>
                 </div>
               </div>
@@ -571,46 +545,50 @@ export default function CustomizationSection({ projectName = "" }) {
             </section>
           </div>
 
-          <aside className="bg-white border border-gray-200 rounded-xl overflow-hidden h-fit sticky top-6 z-10">
-            <div className="px-6 py-4 border-b border-gray-100 bg-gray-50/50">
-              <h3 className="text-sm font-semibold text-charcoal">Live Preview</h3>
-            </div>
-            <div className="p-6">
-              <div className="rounded-2xl border border-gray-200 p-4 bg-gray-50 space-y-3">
-                <div className="flex justify-end items-end gap-2">
-                  <div
-                    className="max-w-[80%] rounded-2xl rounded-br-md px-3 py-2 text-sm text-white shadow-sm"
-                    style={{ backgroundColor: themeColor, fontFamily }}
-                  >
-                    Hii {previewProjectName}, help me!
-                  </div>
-                  <div className="h-8 w-8 rounded-full bg-charcoal text-white flex items-center justify-center shrink-0">
-                    <User size={14} />
-                  </div>
-                </div>
-
-                <div className="flex items-end gap-2">
-                  <div className="h-8 w-8 rounded-full bg-white border border-gray-200 flex items-center justify-center shrink-0 overflow-hidden">
-                    {chatbotAvatarUrl ? (
-                      <img src={chatbotAvatarUrl} alt="Chatbot icon" className="h-full w-full object-cover" />
-                    ) : (
-                      <Bot size={14} className="text-charcoal" />
-                    )}
-                  </div>
-                  <div
-                    className="max-w-[80%] rounded-2xl rounded-bl-md px-3 py-2 text-sm text-charcoal bg-white border border-gray-200"
-                    style={{ fontFamily }}
-                  >
-                    Hi! I am {previewChatbotName}. Please tell me what kind of help you want.
-                  </div>
-                </div>
+          <aside className="xl:sticky xl:top-6 self-start z-10">
+            <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+              <div className="px-6 py-4 border-b border-gray-100 bg-gray-50/50">
+                <h3 className="text-sm font-semibold text-charcoal">Live Preview</h3>
               </div>
+              <div className="p-6">
+                <div className="rounded-2xl border border-gray-200 p-4 bg-gray-50 space-y-3">
+                  <div className="flex justify-end items-end gap-2">
+                    <div
+                      className="max-w-[80%] rounded-2xl rounded-br-md px-3 py-2 text-sm shadow-sm"
+                      style={{ backgroundColor: themeColor, fontFamily, color: userFontColor }}
+                    >
+                      Hii {previewProjectName}, help me!
+                    </div>
+                    <div className="h-8 w-8 rounded-full bg-charcoal text-white flex items-center justify-center shrink-0">
+                      <User size={14} />
+                    </div>
+                  </div>
 
-              <div className="mt-4 space-y-2 text-xs text-gray-500">
-                <p><strong>Name:</strong> {previewChatbotName}</p>
-                <p><strong>Color:</strong> <span className="font-mono">{themeColor}</span></p>
-                <p><strong>Font:</strong> {fontFamily}</p>
-                {selectedIcon?.source !== "none" ? <p className="text-green-600">Selected icon ready</p> : null}
+                  <div className="flex items-end gap-2">
+                    <div className="h-8 w-8 rounded-full bg-white border border-gray-200 flex items-center justify-center shrink-0 overflow-hidden">
+                      {chatbotAvatarUrl ? (
+                        <img src={chatbotAvatarUrl} alt="Chatbot icon" className="h-full w-full object-cover" />
+                      ) : (
+                        <Bot size={14} className="text-charcoal" />
+                      )}
+                    </div>
+                    <div
+                      className="max-w-[80%] rounded-2xl rounded-bl-md px-3 py-2 text-sm bg-white border border-gray-200"
+                      style={{ fontFamily, color: botFontColor }}
+                    >
+                      Hi! I am {previewChatbotName}. Please tell me what kind of help you want.
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 space-y-2 text-xs text-gray-500">
+                  <p><strong>Name:</strong> {previewChatbotName}</p>
+                  <p><strong>Color:</strong> <span className="font-mono">{themeColor}</span></p>
+                  <p><strong>User text:</strong> <span className="font-mono">{userFontColor}</span></p>
+                  <p><strong>Chatbot text:</strong> <span className="font-mono">{botFontColor}</span></p>
+                  <p><strong>Font:</strong> {fontFamily}</p>
+                  {selectedIcon?.source !== "none" ? <p className="text-green-600">Selected icon ready</p> : null}
+                </div>
               </div>
             </div>
           </aside>

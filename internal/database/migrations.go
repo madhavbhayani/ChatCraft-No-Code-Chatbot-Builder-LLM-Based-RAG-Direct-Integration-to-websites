@@ -325,6 +325,15 @@ var migrations = []struct {
 			DROP TABLE IF EXISTS project_analytics;
 		`,
 	},
+	{
+		Name: "023_add_bot_customization_font_colors",
+		SQL: `
+			ALTER TABLE bot_customizations
+				ADD COLUMN IF NOT EXISTS user_font_color VARCHAR(20) NOT NULL DEFAULT '#FFFFFF';
+			ALTER TABLE bot_customizations
+				ADD COLUMN IF NOT EXISTS bot_font_color VARCHAR(20) NOT NULL DEFAULT '#111827';
+		`,
+	},
 }
 
 // RunMigrations applies all pending migrations.
